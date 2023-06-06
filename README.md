@@ -94,5 +94,5 @@ References:
 
 ## Development
 
-This is code is under development to improve the network and it's performance
+This is code is under development to improve the network and its performance
 
