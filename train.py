@@ -135,25 +135,26 @@ def parse_comma_separated_list(s):
 # Support Sets (S)
 @click.option('-K', '--num-support-sets', type=int, default=128, help="set number of support sets (warping functions)")
 @click.option('-D', '--num-support-dipoles', type=int, default=4, help="set number of support dipoles per support set")
-@click.option('--learn_alphas', action='store_true', default=True, help='learn RBF alpha params')
-@click.option('--learn_gammas', action='store_true', default=False, help='learn RBF gamma params')
-@click.option('-g', '--gamma', type=float, help="set RBF gamma param; when --learn-gammas is set, this will be the initial value of gammas for all RBFs")
+@click.option('--learn_alphas', type=bool, default=True, help='learn RBF alpha params')
+@click.option('--learn_gammas', type=bool, default=True, help='learn RBF gamma params')
+@click.option('-g', '--gamma', type=float, default=0.001, help="set RBF gamma param; when --learn-gammas is set, this will be the initial value of gammas for all RBFs")
 @click.option('--support-set-lr', type=float, default=1e-4, help="set learning rate")
 @click.option('--lambda-cls', type=float, default=1.00, help="classification loss weight")
 @click.option('--lambda-reg', type=float, default=0.25, help="regression loss weight")
     
 
 # Reconstructor (R)
-@click.option('--reconstructor-type', type=str, default='ResNet', help='set reconstructor network type')
+@click.option('--reconstructor-type', type=str, default='LeNet', help='set reconstructor network type')
 @click.option('--min-shift-magnitude', type=float, default=0.25, help="set minimum shift magnitude")
 @click.option('--max-shift-magnitude', type=float, default=0.45, help="set shifts magnitude scale")
 @click.option('--reconstructor-lr', type=float, default=1e-4, help="set learning rate for reconstructor R optimization")
 
 # Optional features.
-@click.option('--cond',         help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=True)
-@click.option('--use_es',       help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=True)
-@click.option('--use_ed',       help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=True)
-@click.option('--mirror',       help='Enable dataset x-flips', metavar='BOOL',                  type=bool, default=False, show_default=True)
+@click.option('--cond',         help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=False)
+@click.option('--use_es',       help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=False)
+@click.option('--use_ed',       help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=False)
+@click.option('--use_warp',     help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=False)
+@click.option('--mirror',       help='Enable dataset x-flips', metavar='BOOL',                  type=bool, default=False, show_default=False)
 @click.option('--aug',          help='Augmentation mode',                                       type=click.Choice(['noaug', 'ada', 'fixed']), default='ada', show_default=True)
 @click.option('--resume',       help='Resume from given network pickle', metavar='[PATH|URL]',  type=str)
 @click.option('--freezed',      help='Freeze first layers of D', metavar='INT',                 type=click.IntRange(min=0), default=0, show_default=True)
@@ -166,6 +167,8 @@ def parse_comma_separated_list(s):
 @click.option('--cmax',         help='Max. feature maps', metavar='INT',                        type=click.IntRange(min=1), default=512, show_default=True)
 @click.option('--glr',          help='G learning rate  [default: varies]', metavar='FLOAT',     type=click.FloatRange(min=0))
 @click.option('--dlr',          help='D learning rate', metavar='FLOAT',                        type=click.FloatRange(min=0), default=0.002, show_default=True)
+@click.option('--support_lr',   help='D learning rate', metavar='FLOAT',                        type=click.FloatRange(min=0), default=1e-4, show_default=True)
+@click.option('--reconstructor_lr',          help='D learning rate', metavar='FLOAT',           type=click.FloatRange(min=0), default=1e-4, show_default=True)
 @click.option('--map-depth',    help='Mapping network depth  [default: varies]', metavar='INT', type=click.IntRange(min=1))
 @click.option('--mbstd-group',  help='Minibatch std group size', metavar='INT',                 type=click.IntRange(min=1), default=4, show_default=True)
 
@@ -209,8 +212,18 @@ def main(**kwargs):
     c = dnnlib.EasyDict() # Main config dict.
     c.ED_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan3.IDNetwork', w_dim=512, z_dim=512, 
                                     num_support_sets = opts.num_support_sets, num_support_dipoles = opts.num_support_dipoles,
-                                    learn_alphas = opts.learn_alphas, learn_gamma = opts.learn_gamma, 
+                                    learn_alphas = opts.learn_alphas, learn_gammas = opts.learn_gammas, 
                                     reconstructor_type = opts.reconstructor_type
+                                )
+    c.RC_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan3.Reconstructor', w_dim=512, z_dim=512, 
+                                    num_support_sets = opts.num_support_sets, num_support_dipoles = opts.num_support_dipoles,
+                                    learn_alphas = opts.learn_alphas, learn_gammas = opts.learn_gammas, 
+                                    reconstructor_type = opts.reconstructor_type
+                                )
+    c.SP_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan3.SupportSets', w_dim=512, z_dim=512, 
+                                    num_support_sets = opts.num_support_sets, num_support_dipoles = opts.num_support_dipoles,
+                                    learn_alphas = opts.learn_alphas, learn_gammas = opts.learn_gammas, 
+                                    reconstructor_type = opts.reconstructor_type, gamma=opts.gamma
                                 )
     c.ES_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan3.StyleNetwork', w_dim=512, z_dim=512)
     c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=512, w_dim=512, mapping_kwargs=dnnlib.EasyDict())
@@ -220,10 +233,13 @@ def main(**kwargs):
     c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
     c.ES_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
     c.ED_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
+    c.RC_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
+    c.SP_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
     c.loss_kwargs = dnnlib.EasyDict(class_name='training.loss.StyleGAN2Loss')
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
     c.use_es = opts.use_es
     c.use_ed = opts.use_ed
+    c.use_warp = opts.use_warp
 
     # Training set.
     c.training_set_kwargs, dataset_name = init_dataset_kwargs(data=opts.data)
@@ -246,6 +262,8 @@ def main(**kwargs):
     c.D_opt_kwargs.lr = opts.dlr
     c.ES_opt_kwargs.lr = opts.dlr
     c.ED_opt_kwargs.lr = opts.dlr
+    c.RC_opt_kwargs.lr = opts.reconstructor_lr
+    c.SP_opt_kwargs.lr = opts.support_lr
     c.metrics = opts.metrics
     c.total_kimg = opts.kimg
     c.kimg_per_tick = opts.tick
