@@ -62,7 +62,7 @@ python train.py --outdir=./outdir/ --cfg=stylegan3-t --data=./prc_folder --gpus=
 
 ```
 
-For Image translative model, the best results are obtained when Style Transformation Pathway is trained first for atleast 200 ticks (set use_es = True and use_ed=False) and then style and identity transformation pathway are trained alternatively (both of them True).
+For Image translative model, the best results are obtained when the warped latent space is learned for trained GAN. For this, first train the network using --use-es=True and --use-ed=True for atleast 5k epochs and then include the warp module using --use-es=True, --use-ed=True, --use_warp=True
 
 
 ## Quality metrics
