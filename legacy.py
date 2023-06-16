@@ -13,11 +13,13 @@ import numpy as np
 import torch
 import dnnlib
 from torch_utils import misc
+import pdb
 
 #----------------------------------------------------------------------------
 
 def load_network_pkl(f, force_fp16=False):
     data = _LegacyUnpickler(f).load()
+    #pdb.set_trace()
 
     # Legacy TensorFlow pickle => convert.
     if isinstance(data, tuple) and len(data) == 3 and all(isinstance(net, _TFNetworkStub) for net in data):
@@ -37,12 +39,14 @@ def load_network_pkl(f, force_fp16=False):
     assert isinstance(data['G'], torch.nn.Module)
     assert isinstance(data['D'], torch.nn.Module)
     assert isinstance(data['G_ema'], torch.nn.Module)
+    assert isinstance(data['ES'], torch.nn.Module)
+    #assert isinstance(data['ED'], torch.nn.Module)
     assert isinstance(data['training_set_kwargs'], (dict, type(None)))
     assert isinstance(data['augment_pipe'], (torch.nn.Module, type(None)))
 
     # Force FP16.
     if force_fp16:
-        for key in ['G', 'D', 'G_ema']:
+        for key in ['ES', 'ED', 'G', 'D', 'G_ema', 'RC', 'SC']:
             old = data[key]
             kwargs = copy.deepcopy(old.init_kwargs)
             fp16_kwargs = kwargs.get('synthesis_kwargs', kwargs)
