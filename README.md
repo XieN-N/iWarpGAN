@@ -29,18 +29,6 @@ The code relies heavily on custom PyTorch extensions that are compiled on the fl
 
 ## Getting started
 
-Pre-trained networks are stored as `*.pkl` files that can be referenced using local filenames or URLs:
-
-```.bash
-# Generate an image using pre-trained model (General GAN model to generate images using noise as input)
-python gen_images.py --outdir=out --data=test_data --trunc=1 --seeds=2 \
-    --network=network.pkl
-
-# Generate an image using pre-trained model (Image translative GAN model to generate images using image an input)
-python gen_images.py --outdir=out --data=test_data --use_es=True --use_ed=True --trunc=1 --seeds=2 \
-    --network=network.pkl
-```
-
 ## Preparing datasets
 
 Datasets are stored in a folder with a metadata file `dataset.json` for labels. Custom datasets can be created from a folder containing images; see [`python dataset_tool.py --help`] for more information:
@@ -71,6 +59,20 @@ For Image translative model, the best results are obtained when the warped laten
 
 Additional quality metrics can also be computed after the training. Check metrics for that.
 
+## Image Generation
+
+Pre-trained networks are stored as `*.pkl` files that can be referenced using local filenames or URLs:
+
+```.bash
+# Generate an image using pre-trained model (General GAN model to generate images using noise as input)
+python gen_images.py --outdir=out --data=test_data --trunc=1 --seeds=2 \
+    --network=network.pkl
+
+# Generate an image using pre-trained model (Image translative GAN model to generate images using image an input)
+python gen_images.py --outdir=out --data=test_data --use_es=True --use_ed=True --trunc=1 --seeds=2 \
+    --network=network.pkl
+```
+The pre-trained networks and some generated images can be found here.
 
 References:
 1. [GANs Trained by a Two Time-Scale Update Rule Converge to a Local Nash Equilibrium](https://arxiv.org/abs/1706.08500), Heusel et al. 2017
