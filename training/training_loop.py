@@ -95,10 +95,14 @@ def training_loop(
     D_kwargs                = {},       # Options for discriminator network.
     ES_kwargs               = {},       # Options for ES network.
     ED_kwargs               = {},       # Options for ED network.
+    RC_kwargs               = {},
+    SP_kwargs               = {},
     G_opt_kwargs            = {},       # Options for generator optimizer.
     D_opt_kwargs            = {},       # Options for discriminator optimizer.
     ES_opt_kwargs           = {},       # Options for ES optimizer.
     ED_opt_kwargs           = {},       # Options for ED optimizer.
+    RC_opt_kwargs           = {},       # Options for ED optimizer.
+    SP_opt_kwargs           = {},       # Options for ED optimizer.
     augment_kwargs          = None,     # Options for augmentation pipeline. None = disable.
     loss_kwargs             = {},       # Options for loss function.
     metrics                 = [],       # Metrics to evaluate during training.
@@ -113,6 +117,8 @@ def training_loop(
     D_reg_interval          = 16,       # How often to perform regularization for D? None = disable lazy regularization.
     ES_reg_interval         = None,     # How often to perform regularization for ES? None = disable lazy regularization.
     ED_reg_interval         = None,     # How often to perform regularization for ED? None = disable lazy regularization.
+    RC_reg_interval         = None,     # How often to perform regularization for ED? None = disable lazy regularization.
+    SP_reg_interval         = None,     # How often to perform regularization for ED? None = disable lazy regularization.
     augment_p               = 0,        # Initial value of augmentation probability.
     ada_target              = None,     # ADA target value. None = fixed p.
     ada_interval            = 4,        # How often to perform ADA adjustment?
@@ -128,6 +134,10 @@ def training_loop(
     progress_fn             = None,     # Callback function for updating training progress. Called for all ranks.
     use_es                  = False,     # Use Style Encoder
     use_ed                  = False,     # Use Identity Encoder
+    use_warp                = False,
+    num_support_sets        = 128,
+    min_shift_magnitude     = 0.25,
+    max_shift_magnitude     = 0.45,
 ):
     # Initialize.
     start_time = time.time()
@@ -173,6 +183,13 @@ def training_loop(
         ED = dnnlib.util.construct_class_by_name(**ED_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     else:
         ED = None
+    
+    if use_warp:
+        RC = dnnlib.util.construct_class_by_name(**RC_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+        SP = dnnlib.util.construct_class_by_name(**SP_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+    else:
+        SP = None
+        RC = None
     G_ema = copy.deepcopy(G).eval()
 
     # Resume from existing pickle.
@@ -180,13 +197,18 @@ def training_loop(
         print(f'Resuming from "{resume_pkl}"')
         with dnnlib.util.open_url(resume_pkl) as f:
             resume_data = legacy.load_network_pkl(f)
-        if use_es and use_ed:
+        if use_es and use_ed and use_warp:
             mdd = [('ES', ES), ('ED', ED), ('G', G), ('D', D), ('G_ema', G_ema)]
+            #mdd = [('ES', ES), ('ED', ED), ('RC', RC), ('SP', SP), ('G', G), ('D', D), ('G_ema', G_ema)]
+        elif use_es and use_ed:
+            mdd = [('ES', ES), ('ED', ED), ('G', G), ('D', D), ('G_ema', G_ema)]
+            #mdd = [('ES', ES), ('G', G), ('D', D), ('G_ema', G_ema)]
         elif use_es:
             mdd = [('ES', ES), ('G', G), ('D', D), ('G_ema', G_ema)]
-            #mdd = [('G', G), ('D', D), ('G_ema', G_ema)]
         elif use_ed:
             mdd = [('ED', ED), ('G', G), ('D', D), ('G_ema', G_ema)]
+        elif use_warp:
+            mdd = [('ES', ES), ('ED', ED), ('G', G), ('D', D), ('G_ema', G_ema)]
         else:
             mdd = [('G', G), ('D', D), ('G_ema', G_ema)]
         for name, module in mdd:
@@ -196,12 +218,13 @@ def training_loop(
     #pdb.set_trace()
     if rank == 0:
         z = torch.empty([batch_gpu, G.z_dim], device=device)
+        z2 = torch.empty([batch_gpu, G.z_dim//2], device=device)
         c = torch.empty([batch_gpu, G.c_dim], device=device)
         img = misc.print_module_summary(G, [z, c])
         if use_es:
             misc.print_module_summary(ES, [img, c])
         if use_ed:
-            misc.print_module_summary(ED, [img, c])
+            misc.print_module_summary(ED, [img, c, z2])
         misc.print_module_summary(D, [img, c])
 
     # Setup augmentation.
@@ -218,12 +241,16 @@ def training_loop(
     # Distribute across GPUs.
     if rank == 0:
         print(f'Distributing across {num_gpus} GPUs...')
-    if use_es and use_ed:
+    if use_es and use_ed and use_warp:
+        md = [ES, ED, RC, SP, G, D, G_ema, augment_pipe]
+    elif use_es and use_ed:
         md = [ES, ED, G, D, G_ema, augment_pipe]
     elif use_es:
         md = [ES, G, D, G_ema, augment_pipe]
     elif use_ed:
         md = [ED, G, D, G_ema, augment_pipe]
+    elif use_warp:
+        md = [RC, SP, G, D, G_ema, augment_pipe]
     else:
         md = [G, D, G_ema, augment_pipe]
     for module in md:
@@ -237,27 +264,30 @@ def training_loop(
     #pdb.set_trace()
     #loss = dnnlib.util.construct_class_by_name(device=device, ES=ES, ED=ED, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
     phases = []
-    if use_es and use_ed:
-        loss = dnnlib.util.construct_class_by_name(device=device, ES=ES, ED=ED, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
-        cfgg = [('ES', ES, ES_opt_kwargs, ES_reg_interval), ('ED', ED, ED_opt_kwargs, ED_reg_interval), ('G_ES', G, G_opt_kwargs, G_reg_interval), ('G_ED', G, G_opt_kwargs, G_reg_interval), ('D', D, D_opt_kwargs, D_reg_interval)]
-    elif use_es:
-        loss = dnnlib.util.construct_class_by_name(device=device, ES=ES, ED=None, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
-        cfgg = [('ES', ES, ES_opt_kwargs, ES_reg_interval), ('G_ES', G, G_opt_kwargs, G_reg_interval), ('G_ED', G, G_opt_kwargs, G_reg_interval), ('D', D, D_opt_kwargs, D_reg_interval)]
-    elif use_ed:
-        loss = dnnlib.util.construct_class_by_name(device=device, ES=None, ED=ED, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
-        cfgg = [('ED', ED, ED_opt_kwargs, ED_reg_interval), ('G_ES', G, G_opt_kwargs, G_reg_interval), ('G_ED', G, G_opt_kwargs, G_reg_interval), ('D', D, D_opt_kwargs, D_reg_interval)]
-    else:
-        loss = dnnlib.util.construct_class_by_name(device=device, ES=None, ED=None, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
+    if use_es and use_ed and use_warp:
+        loss = dnnlib.util.construct_class_by_name(device=device, ES=ES, ED=ED, RC=RC, SP=SP, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
+        cfgg = [('SP', SP, SP_opt_kwargs, SP_reg_interval), ('RC', RC, RC_opt_kwargs, RC_reg_interval)]
+    elif use_es and use_ed:
+        loss = dnnlib.util.construct_class_by_name(device=device, ES=ES, ED=ED, RC=None, SP=None, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
         cfgg = [('G_ES', G, G_opt_kwargs, G_reg_interval), ('G_ED', G, G_opt_kwargs, G_reg_interval), ('D', D, D_opt_kwargs, D_reg_interval)]
+    elif use_es:
+        loss = dnnlib.util.construct_class_by_name(device=device, ES=ES, ED=None, RC=None, SP=None, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
+        cfgg = [('G_ES', G, G_opt_kwargs, G_reg_interval), ('D', D, D_opt_kwargs, D_reg_interval)]
+    elif use_ed:
+        loss = dnnlib.util.construct_class_by_name(device=device, ES=None, ED=ED, RC=None, SP=None, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
+        cfgg = [('G_ED', G, G_opt_kwargs, G_reg_interval), ('D', D, D_opt_kwargs, D_reg_interval)]
+    elif use_warp:
+        loss = dnnlib.util.construct_class_by_name(device=device, ES=None, ED=None, RC=RC, SP=RC, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
+        cfgg = [('SP', RC, RC_opt_kwargs, RC_reg_interval), ('RC', RC, RC_opt_kwargs, RC_reg_interval)]
+    else:
+        loss = dnnlib.util.construct_class_by_name(device=device, ES=None, ED=None, RC=None, SP=None, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
+        cfgg = [('G', G, G_opt_kwargs, G_reg_interval), ('D', D, D_opt_kwargs, D_reg_interval)]
     for name, module, opt_kwargs, reg_interval in cfgg:
         if reg_interval is None:
-            if 'G' in name:
-                if 'ES' in name and use_es:
-                    opt = dnnlib.util.construct_class_by_name(params=list(G.parameters())+list(ES.parameters()), **opt_kwargs)
-                elif 'ED' in name and use_ed:
-                    opt = dnnlib.util.construct_class_by_name(params=list(G.parameters())+list(ED.parameters()), **opt_kwargs)
-                else:
-                    opt = dnnlib.util.construct_class_by_name(params=module.parameters(), **opt_kwargs)
+            if name == 'G_ES' and use_es:
+                opt = dnnlib.util.construct_class_by_name(params=list(G.parameters())+list(ES.parameters()), **opt_kwargs)
+            if name == 'G_ED' and use_ed:
+                opt = dnnlib.util.construct_class_by_name(params=list(G.parameters())+list(ED.parameters()), **opt_kwargs)
             else:
                 opt = dnnlib.util.construct_class_by_name(params=module.parameters(), **opt_kwargs) # subclass of torch.optim.Optimizer
             phases += [dnnlib.EasyDict(name=name+'both', module=module, opt=opt, interval=1)]
@@ -266,13 +296,10 @@ def training_loop(
             opt_kwargs = dnnlib.EasyDict(opt_kwargs)
             opt_kwargs.lr = opt_kwargs.lr * mb_ratio
             opt_kwargs.betas = [beta ** mb_ratio for beta in opt_kwargs.betas]
-            if 'G' in name:
-                if 'ES' in name and use_es:
-                    opt = dnnlib.util.construct_class_by_name(params=list(G.parameters())+list(ES.parameters()), **opt_kwargs)
-                elif 'ED' in name and use_ed:
-                    opt = dnnlib.util.construct_class_by_name(params=list(G.parameters())+list(ED.parameters()), **opt_kwargs)
-                else:
-                    opt = dnnlib.util.construct_class_by_name(params=module.parameters(), **opt_kwargs)
+            if name == 'G_ES' and use_es:
+                opt = dnnlib.util.construct_class_by_name(params=list(G.parameters())+list(ES.parameters()), **opt_kwargs)
+            if name == 'G_ED' and use_ed:
+                opt = dnnlib.util.construct_class_by_name(params=list(G.parameters())+list(ED.parameters()), **opt_kwargs)
             else:
                 opt = dnnlib.util.construct_class_by_name(params=module.parameters(), **opt_kwargs) # subclass of torch.optim.Optimizer
             phases += [dnnlib.EasyDict(name=name+'main', module=module, opt=opt, interval=1)]
@@ -349,8 +376,12 @@ def training_loop(
             all_gen_c = torch.from_numpy(np.stack(all_gen_c)).pin_memory().to(device)
             all_gen_c = [phase_gen_c.split(batch_gpu) for phase_gen_c in all_gen_c.split(batch_size)]
 
+
+            target_support_sets_indices = torch.randint(0, num_support_sets, [len(phases) * batch_size], device=device)
+            target_support_sets_indices = [phase_target_support_sets_indices.split(batch_gpu) for phase_target_support_sets_indices in target_support_sets_indices.split(batch_size)]
+
         # Execute training phases.
-        for phase, phase_gen_z1, phase_gen_z2, phase_gen_c in zip(phases, all_gen_z1, all_gen_z2, all_gen_c):
+        for phase, phase_gen_z1, phase_gen_z2, phase_gen_c, phase_target_support_sets_indices in zip(phases, all_gen_z1, all_gen_z2, all_gen_c, target_support_sets_indices):
             #if 'ED' in phase.name:
             #    pdb.set_trace()
 
@@ -363,8 +394,26 @@ def training_loop(
             phase.opt.zero_grad(set_to_none=True)
 
             phase.module.requires_grad_(True)
-            for real_img1, real_img2, real_c1, real_c2, gen_z1, gen_z2, gen_c in zip(phase_real_img1, phase_real_img2, phase_real_c1, phase_real_c2, phase_gen_z1, phase_gen_z2, phase_gen_c):
-                loss.accumulate_gradients(phase=phase.name, real_img1=real_img1, real_img2=real_img2, real_c1=real_c1, real_c2=real_c2, gen_z1=gen_z1, gen_z2=gen_z2, gen_c=gen_c, gain=phase.interval, cur_nimg=cur_nimg, use_es=use_es, use_ed=use_ed)
+            #pdb.set_trace()
+            for real_img1, real_img2, real_c1, real_c2, gen_z1, gen_z2, gen_c, trg_support_sets_indices in zip(phase_real_img1, phase_real_img2, phase_real_c1, phase_real_c2, phase_gen_z1, phase_gen_z2, phase_gen_c, phase_target_support_sets_indices):
+                loss.accumulate_gradients(phase=phase.name, 
+                                        real_img1=real_img1, 
+                                        real_img2=real_img2, 
+                                        real_c1=real_c1, 
+                                        real_c2=real_c2, 
+                                        gen_z1=gen_z1, 
+                                        gen_z2=gen_z2, 
+                                        gen_c=gen_c, 
+                                        gain=phase.interval, 
+                                        cur_nimg=cur_nimg,
+                                        min_shift_magnitude=min_shift_magnitude, 
+                                        max_shift_magnitude=max_shift_magnitude,
+                                        trg_support_sets_indices=trg_support_sets_indices,
+                                        num_support_sets=num_support_sets,
+                                        use_es=use_es, 
+                                        use_ed=use_ed,
+                                        use_warp=use_warp)
+            
             phase.module.requires_grad_(False)
 
             # Update weights.
@@ -447,7 +496,7 @@ def training_loop(
         snapshot_data = None
         if (network_snapshot_ticks is not None) and (done or int(cur_tick) % network_snapshot_ticks == 0):
             #pdb.set_trace()
-            snapshot_data = dict(ES=ES, ED=ED, G=G, D=D, G_ema=G_ema, augment_pipe=augment_pipe, training_set_kwargs=dict(training_set_kwargs))
+            snapshot_data = dict(ES=ES, ED=ED, RC=RC, SP=SP, G=G, D=D, G_ema=G_ema, augment_pipe=augment_pipe, training_set_kwargs=dict(training_set_kwargs))
             for key, value in snapshot_data.items():
                 if isinstance(value, torch.nn.Module):
                     value = copy.deepcopy(value).eval().requires_grad_(False)
