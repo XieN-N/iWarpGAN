@@ -6,6 +6,7 @@ Reference: https://github.com/chi0tzp/WarpedGANSpace
 """Generator architecture from the paper
 "Alias-Free Generative Adversarial Networks"."""
 
+
 import numpy as np
 import scipy.signal
 import scipy.optimize
