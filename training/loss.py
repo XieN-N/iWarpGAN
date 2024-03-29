@@ -84,13 +84,14 @@ class StyleGAN2Loss(Loss):
         z = self.ES(img, c)
         return z
     
-    def run_ED(self, img, c, z2):
+    def run_ED(self, img, x2):
         #pdb.set_trace()
-        z = self.ED(img, c, z2)
+        z = self.ED(img, x2)
         return z
     
     def run_SP(self, img, z_org, min_shift_magnitude, max_shift_magnitude, trg_support_sets_indices, num_support_sets):
         #pdb.set_trace()
+        #trg_support_sets_indices = torch.randint(0, num_support_sets, [img.shape[0]]).to(device=z_org.device)
         shift_magnitudes_pos = (min_shift_magnitude - max_shift_magnitude) * torch.rand(trg_support_sets_indices.size()) + max_shift_magnitude
         shift_magnitudes_neg = (min_shift_magnitude - max_shift_magnitude) * torch.rand(trg_support_sets_indices.size()) - min_shift_magnitude
         shift_magnitudes_pool = torch.cat((shift_magnitudes_neg, shift_magnitudes_pos))
@@ -100,12 +101,16 @@ class StyleGAN2Loss(Loss):
                                                                               num_samples=img.shape[0],
                                                                               replacement=False)]
         trg_shift_magnitudes = trg_shift_magnitudes.to(device=trg_support_sets_indices.device)
+        #pdb.set_trace()
         supp_sets_mask = torch.zeros([img.shape[0], num_support_sets]).to(device=trg_support_sets_indices.device)
         for i, (index, val) in enumerate(zip(trg_support_sets_indices, trg_shift_magnitudes)):
                 supp_sets_mask[i][index] += 1.0
-        
+
+        #pdb.set_trace()
         shift = trg_shift_magnitudes.reshape(-1, 1) * self.SP(supp_sets_mask, z_org)
         z_shift = torch.add(z_org, shift)
+        z_shift = torch.nn.functional.normalize(z_shift, p=2, dim=1)
+        #z_shift = z_org
         
         return z_shift, trg_shift_magnitudes
     
@@ -117,6 +122,7 @@ class StyleGAN2Loss(Loss):
 
     def run_G(self, z, c, update_emas=False):
         #pdb.set_trace()
+        #z = torch.nn.functional.normalize(z, p=2, dim=1)
         ws = self.G.mapping(z, c, update_emas=update_emas)
         if self.style_mixing_prob > 0:
             with torch.autograd.profiler.record_function('style_mixing'):
@@ -164,7 +170,7 @@ class StyleGAN2Loss(Loss):
                     z1 = self.run_ES(real_img1, real_c1)
                 if use_ed:
                     #z2 = self.run_ED(real_img2, gen_c)
-                    z2 = self.run_ED(real_img2, real_c2, z2)
+                    z2 = self.run_ED(real_img2, z2)
                 z = torch.cat((z1, z2), dim=1)
 
                 z_shift, trg_shift_magnitudes = self.run_SP(real_img2, z2, min_shift_magnitude, max_shift_magnitude, trg_support_sets_indices, num_support_sets)
@@ -198,7 +204,8 @@ class StyleGAN2Loss(Loss):
                     z1 = self.run_ES(real_img1, real_c1)
                 if use_ed:
                     #z2 = self.run_ED(real_img2, gen_c)
-                    z2 = self.run_ED(real_img2, real_c2, z2)
+                    z2 = self.run_ED(real_img2, z2)
+                #pdb.set_trace()
                 z = torch.cat((z1, z2), dim=1)
 
                 if use_warp:
@@ -214,7 +221,7 @@ class StyleGAN2Loss(Loss):
                     warp_img = self.warp_images(gen_img, real_c1)
                 if use_ed:
                     #z_synth2 = self.run_ED(gen_img, gen_c)
-                    z_synth2 = self.run_ED(gen_img, real_c1, z2)
+                    z_synth2 = self.run_ED(gen_img, z2)
                 #gen_logits, y_pred = self.run_D(gen_img, gen_c, blur_sigma=blur_sigma)
                 gen_logits, y_pred = self.run_D(gen_img, real_c1, blur_sigma=blur_sigma)
 
@@ -257,7 +264,7 @@ class StyleGAN2Loss(Loss):
                     z1 = self.run_ES(real_img1, real_c1)
                 if use_ed:
                     #z2 = self.run_ED(real_img2, gen_c)
-                    z2 = self.run_ED(real_img2, real_c2, z2)
+                    z2 = self.run_ED(real_img2, z2)
                 z = torch.cat((z1, z2), dim=1)
 
                 if use_warp:
@@ -293,7 +300,7 @@ class StyleGAN2Loss(Loss):
                     z1 = self.run_ES(real_img1, real_c1)
                 if use_ed:
                     #z2 = self.run_ED(real_img2, gen_c)
-                    z2 = self.run_ED(real_img2, real_c2, z2)
+                    z2 = self.run_ED(real_img2, z2)
                 z = torch.cat((z1, z2), dim=1)
 
                 if use_warp:
