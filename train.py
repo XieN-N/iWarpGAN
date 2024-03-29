@@ -136,7 +136,7 @@ def parse_comma_separated_list(s):
 @click.option('-K', '--num-support-sets', type=int, default=128, help="set number of support sets (warping functions)")
 @click.option('-D', '--num-support-dipoles', type=int, default=4, help="set number of support dipoles per support set")
 @click.option('--learn_alphas', type=bool, default=True, help='learn RBF alpha params')
-@click.option('--learn_gammas', type=bool, default=True, help='learn RBF gamma params')
+@click.option('--learn_gammas', type=bool, default=False, help='learn RBF gamma params')
 @click.option('-g', '--gamma', type=float, default=0.001, help="set RBF gamma param; when --learn-gammas is set, this will be the initial value of gammas for all RBFs")
 @click.option('--support-set-lr', type=float, default=1e-4, help="set learning rate")
 @click.option('--lambda-cls', type=float, default=1.00, help="classification loss weight")
@@ -151,8 +151,9 @@ def parse_comma_separated_list(s):
 
 # Optional features.
 @click.option('--cond',         help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=False)
-@click.option('--use_es',       help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=False)
-@click.option('--use_ed',       help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=False)
+@click.option('--use_es',       help='Train ES model', metavar='BOOL',                          type=bool, default=False, show_default=False)
+@click.option('--use_ed',       help='Train ED model', metavar='BOOL',                          type=bool, default=False, show_default=False)
+@click.option('--first_enc',    help='First time Train conditional model', metavar='BOOL',      type=bool, default=False, show_default=False)
 @click.option('--use_warp',     help='Train conditional model', metavar='BOOL',                 type=bool, default=False, show_default=False)
 @click.option('--mirror',       help='Enable dataset x-flips', metavar='BOOL',                  type=bool, default=False, show_default=False)
 @click.option('--aug',          help='Augmentation mode',                                       type=click.Choice(['noaug', 'ada', 'fixed']), default='ada', show_default=True)
@@ -176,7 +177,7 @@ def parse_comma_separated_list(s):
 @click.option('--desc',         help='String to include in result dir name', metavar='STR',     type=str)
 @click.option('--metrics',      help='Quality metrics', metavar='[NAME|A,B,C|none]',            type=parse_comma_separated_list, default='fid50k_full', show_default=True)
 @click.option('--kimg',         help='Total training duration', metavar='KIMG',                 type=click.IntRange(min=1), default=25000, show_default=True)
-@click.option('--tick',         help='How often to print progress', metavar='KIMG',             type=click.IntRange(min=1), default=5, show_default=True)
+@click.option('--tick',         help='How often to print progress', metavar='KIMG',             type=click.IntRange(min=1), default=1, show_default=True)
 @click.option('--snap',         help='How often to save snapshots', metavar='TICKS',            type=click.IntRange(min=1), default=10, show_default=True)
 @click.option('--seed',         help='Random seed', metavar='INT',                              type=click.IntRange(min=0), default=0, show_default=True)
 @click.option('--fp32',         help='Disable mixed-precision', metavar='BOOL',                 type=bool, default=False, show_default=True)
@@ -189,6 +190,8 @@ def main(**kwargs):
     "Alias-Free Generative Adversarial Networks".
 
     Examples:
+
+    python -W ignore train.py --outdir=/research/iprobe-tmp/yadavshi/CITER22/iWarpGAN-PyTorch/Proposed-64/Proposed2/outdir2-Casia1000-G-ES-EDZW-LabelMapV-RealC1/ --cfg=stylegan3-t --data=/research/iprobe-tmp/yadavshi/CITER22/iWarpGAN-PyTorch/Proposed-64/Proposed2/CS1000-Variations/ --gpus=6 --batch=18 --gamma=8.2 --mirror=1 --mbstd-group=2 --use_ed=True --use_es=True --resume=/research/iprobe-tmp/yadavshi/CITER22/iWarpGAN-PyTorch/Proposed-64/Proposed2/outdir-Casia1000-G-ES-EDZW-LabelMapV-RealC1/00015-stylegan3-t--gpus4-batch12-gamma8.2/network-snapshot-025000.pkl
 
     \b
     # Train StyleGAN3-T for AFHQv2 using 8 GPUs.
@@ -210,7 +213,7 @@ def main(**kwargs):
     # Initialize config.
     opts = dnnlib.EasyDict(kwargs) # Command line arguments.
     c = dnnlib.EasyDict() # Main config dict.
-    c.ED_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan3.IDNetwork', w_dim=512, z_dim=512, 
+    c.ED_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.IDNetwork', w_dim=512, z_dim=512, 
                                     num_support_sets = opts.num_support_sets, num_support_dipoles = opts.num_support_dipoles,
                                     learn_alphas = opts.learn_alphas, learn_gammas = opts.learn_gammas, 
                                     reconstructor_type = opts.reconstructor_type
@@ -225,7 +228,7 @@ def main(**kwargs):
                                     learn_alphas = opts.learn_alphas, learn_gammas = opts.learn_gammas, 
                                     reconstructor_type = opts.reconstructor_type, gamma=opts.gamma
                                 )
-    c.ES_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan3.StyleNetwork', w_dim=512, z_dim=512)
+    c.ES_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.StyleNetwork', w_dim=512, z_dim=512, mapping_kwargs=dnnlib.EasyDict())
     c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=512, w_dim=512, mapping_kwargs=dnnlib.EasyDict())
     c.D_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.Discriminator', block_kwargs=dnnlib.EasyDict(), 
                                     mapping_kwargs=dnnlib.EasyDict(), epilogue_kwargs=dnnlib.EasyDict())
@@ -239,6 +242,7 @@ def main(**kwargs):
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
     c.use_es = opts.use_es
     c.use_ed = opts.use_ed
+    c.first_enc = opts.first_enc
     c.use_warp = opts.use_warp
 
     # Training set.
@@ -255,6 +259,7 @@ def main(**kwargs):
     c.G_kwargs.channel_base = c.D_kwargs.channel_base = opts.cbase
     c.G_kwargs.channel_max = c.D_kwargs.channel_max = opts.cmax
     c.G_kwargs.mapping_kwargs.num_layers = (8 if opts.cfg == 'stylegan2' else 2) if opts.map_depth is None else opts.map_depth
+    c.ES_kwargs.mapping_kwargs.num_layers = (8 if opts.cfg == 'stylegan2' else 2) if opts.map_depth is None else opts.map_depth
     c.D_kwargs.block_kwargs.freeze_layers = opts.freezed
     c.D_kwargs.epilogue_kwargs.mbstd_group_size = opts.mbstd_group
     c.loss_kwargs.r1_gamma = opts.gamma
