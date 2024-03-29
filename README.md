@@ -39,18 +39,16 @@ python dataset_tool.py --source=./image-folder/ --dest=./prc_folder
 
 ## Training
 
-You can train new networks using `train.py`. For example:
+Since this work aims to manipulate the latent space of a Generator, first start with a pre-trained Generator. We have utilized stylegan-2 as our backbone network, but you can use any network of your choice.
 
 ```.bash
-# General GAN model to generate images using noise as input
-python train.py --outdir=./outdir/ --cfg=stylegan3-t --data=./prc_folder --gpus=n-gpus --batch=n-batch --gamma=8.2 --mirror=1 --cond True 
+# To obtain stylegan-2 pre-trained on iris datasets:
+python train.py --outdir=./outdir/ --cfg=stylegan2 --data=./prc_folder --gpus=n-gpus --batch=n-batch --gamma=8.2 --cond True --metrics=none
 
-#Image translative GAN model to generate images using image an input
-python train.py --outdir=./outdir/ --cfg=stylegan3-t --data=./prc_folder --gpus=n-gpus --batch=n-batch --gamma=8.2 --mirror=1 --cond True --use_es=True  --use_ed==True
+# Train iWaprGAN
+python train.py --outdir=./outdir/ --cfg=stylegan2 --data=./prc_folder --use_es=True --use_ed=True --use_warp=True --first_enc=True --gpus=n-gpus --batch=n-batch --gamma=8.2 --cond=True —resume=./pre-trained_stylegan2 --metrics=none
 
 ```
-
-For Image translative model, the best results are obtained when the warped latent space is learned for trained GAN. For this, first train the network using --use-es=True and --use-ed=True for atleast 5k epochs and then include the warp module using --use-es=True, --use-ed=True, --use_warp=True
 
 
 ## Quality metrics
