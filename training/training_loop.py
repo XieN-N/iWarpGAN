@@ -135,6 +135,7 @@ def training_loop(
     use_es                  = False,     # Use Style Encoder
     use_ed                  = False,     # Use Identity Encoder
     use_warp                = False,
+    first_enc               = False,
     num_support_sets        = 128,
     min_shift_magnitude     = 0.25,
     max_shift_magnitude     = 0.45,
@@ -193,14 +194,19 @@ def training_loop(
     G_ema = copy.deepcopy(G).eval()
 
     # Resume from existing pickle.
+    #pdb.set_trace()
     if (resume_pkl is not None) and (rank == 0):
         print(f'Resuming from "{resume_pkl}"')
         with dnnlib.util.open_url(resume_pkl) as f:
             resume_data = legacy.load_network_pkl(f)
-        if use_es and use_ed and use_warp:
-            mdd = [('ES', ES), ('ED', ED), ('G', G), ('D', D), ('G_ema', G_ema)]
-            #mdd = [('ES', ES), ('ED', ED), ('RC', RC), ('SP', SP), ('G', G), ('D', D), ('G_ema', G_ema)]
-        elif use_es and use_ed:
+        if use_es and use_ed and use_warp and first_enc:
+            mdd = [('G', G), ('D', D), ('G_ema', G_ema)]
+        elif use_es and use_ed and use_warp and not first_enc:
+            #mdd = [('ES', ES), ('ED', ED), ('G', G), ('D', D), ('G_ema', G_ema)]
+            mdd = [('ES', ES), ('ED', ED), ('RC', RC), ('SP', SP), ('G', G), ('D', D), ('G_ema', G_ema)]
+        elif use_es and use_ed and first_enc:
+            mdd = [('G', G), ('D', D), ('G_ema', G_ema)]
+        elif use_es and use_ed and not first_enc:
             mdd = [('ES', ES), ('ED', ED), ('G', G), ('D', D), ('G_ema', G_ema)]
             #mdd = [('ES', ES), ('G', G), ('D', D), ('G_ema', G_ema)]
         elif use_es:
@@ -224,7 +230,7 @@ def training_loop(
         if use_es:
             misc.print_module_summary(ES, [img, c])
         if use_ed:
-            misc.print_module_summary(ED, [img, c, z2])
+            misc.print_module_summary(ED, [img, z2])
         misc.print_module_summary(D, [img, c])
 
     # Setup augmentation.
@@ -266,7 +272,7 @@ def training_loop(
     phases = []
     if use_es and use_ed and use_warp:
         loss = dnnlib.util.construct_class_by_name(device=device, ES=ES, ED=ED, RC=RC, SP=SP, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
-        cfgg = [('SP', SP, SP_opt_kwargs, SP_reg_interval), ('RC', RC, RC_opt_kwargs, RC_reg_interval)]
+        cfgg = [('G_ES', G, G_opt_kwargs, G_reg_interval), ('G_ED', G, G_opt_kwargs, G_reg_interval), ('D', D, D_opt_kwargs, D_reg_interval), ('SP', SP, SP_opt_kwargs, SP_reg_interval), ('RC', RC, RC_opt_kwargs, RC_reg_interval)]
     elif use_es and use_ed:
         loss = dnnlib.util.construct_class_by_name(device=device, ES=ES, ED=ED, RC=None, SP=None, G=G, D=D, augment_pipe=augment_pipe, **loss_kwargs) # subclass of training.loss.Loss
         cfgg = [('G_ES', G, G_opt_kwargs, G_reg_interval), ('G_ED', G, G_opt_kwargs, G_reg_interval), ('D', D, D_opt_kwargs, D_reg_interval)]
@@ -355,6 +361,7 @@ def training_loop(
     if progress_fn is not None:
         progress_fn(0, total_kimg)
     
+    #i=0
     while True:
         #pdb.set_trace()
         # Fetch training data.
@@ -396,6 +403,7 @@ def training_loop(
             phase.module.requires_grad_(True)
             #pdb.set_trace()
             for real_img1, real_img2, real_c1, real_c2, gen_z1, gen_z2, gen_c, trg_support_sets_indices in zip(phase_real_img1, phase_real_img2, phase_real_c1, phase_real_c2, phase_gen_z1, phase_gen_z2, phase_gen_c, phase_target_support_sets_indices):
+                
                 loss.accumulate_gradients(phase=phase.name, 
                                         real_img1=real_img1, 
                                         real_img2=real_img2, 
@@ -512,6 +520,7 @@ def training_loop(
                     pickle.dump(snapshot_data, f)
 
         # Evaluate metrics.
+        
         if (snapshot_data is not None) and (len(metrics) > 0):
             if rank == 0:
                 print('Evaluating metrics...')
@@ -522,6 +531,7 @@ def training_loop(
                     metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=snapshot_pkl)
                 stats_metrics.update(result_dict.results)
         del snapshot_data # conserve memory
+        
 
         # Collect statistics.
         for phase in phases:
