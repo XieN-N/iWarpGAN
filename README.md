@@ -62,11 +62,7 @@ Additional quality metrics can also be computed after the training. Check metric
 Pre-trained networks are stored as `*.pkl` files that can be referenced using local filenames or URLs:
 
 ```.bash
-# Generate an image using pre-trained model (General GAN model to generate images using noise as input)
-python gen_images.py --outdir=out --data=test_data --trunc=1 --seeds=2 \
-    --network=network.pkl
-
-# Generate an image using pre-trained model (Image translative GAN model to generate images using image an input)
+# Generate an image using trained model
 python gen_images.py --outdir=out --data=test_data --use_ed=True --use_es=True --use_warp=True --resume=model_name.pkl
 
 ```
