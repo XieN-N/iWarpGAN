@@ -59,7 +59,7 @@ Additional quality metrics can also be computed after the training. Check metric
 
 ## Image Generation
 
-Pre-trained networks are stored as `*.pkl` files that can be referenced using local filenames or URLs:
+Pre-trained networks are stored as `*.pkl` files that can be found here: https://drive.google.com/drive/u/0/folders/1Qu5rWzqA4lO_o91UKE1hwfGiQWZtsMEn 
 
 ```.bash
 # Generate an image using trained model
