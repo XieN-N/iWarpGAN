@@ -67,8 +67,8 @@ python gen_images.py --outdir=out --data=test_data --trunc=1 --seeds=2 \
     --network=network.pkl
 
 # Generate an image using pre-trained model (Image translative GAN model to generate images using image an input)
-python gen_images.py --outdir=out --data=test_data --use_es=True --use_ed=True --trunc=1 --seeds=2 \
-    --network=network.pkl
+python gen_images.py --outdir=out --data=test_data --use_ed=True --use_es=True --use_warp=True --resume=model_name.pkl
+
 ```
 The pre-trained networks and some generated images can be found here.
 
