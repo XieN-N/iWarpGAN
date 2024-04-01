@@ -188,26 +188,6 @@ def parse_comma_separated_list(s):
 def main(**kwargs):
     """Train a GAN using the techniques described in the paper
     "Alias-Free Generative Adversarial Networks".
-
-    Examples:
-
-    python -W ignore train.py --outdir=/research/iprobe-tmp/yadavshi/CITER22/iWarpGAN-PyTorch/Proposed-64/Proposed2/outdir2-Casia1000-G-ES-EDZW-LabelMapV-RealC1/ --cfg=stylegan3-t --data=/research/iprobe-tmp/yadavshi/CITER22/iWarpGAN-PyTorch/Proposed-64/Proposed2/CS1000-Variations/ --gpus=6 --batch=18 --gamma=8.2 --mirror=1 --mbstd-group=2 --use_ed=True --use_es=True --resume=/research/iprobe-tmp/yadavshi/CITER22/iWarpGAN-PyTorch/Proposed-64/Proposed2/outdir-Casia1000-G-ES-EDZW-LabelMapV-RealC1/00015-stylegan3-t--gpus4-batch12-gamma8.2/network-snapshot-025000.pkl
-
-    \b
-    # Train StyleGAN3-T for AFHQv2 using 8 GPUs.
-    python train.py --outdir=~/training-runs --cfg=stylegan3-t --data=~/datasets/afhqv2-512x512.zip \\
-        --gpus=8 --batch=32 --gamma=8.2 --mirror=1
-
-    \b
-    # Fine-tune StyleGAN3-R for MetFaces-U using 1 GPU, starting from the pre-trained FFHQ-U pickle.
-    python train.py --outdir=~/training-runs --cfg=stylegan3-r --data=~/datasets/metfacesu-1024x1024.zip \\
-        --gpus=8 --batch=32 --gamma=6.6 --mirror=1 --kimg=5000 --snap=5 \\
-        --resume=https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-ffhqu-1024x1024.pkl
-
-    \b
-    # Train StyleGAN2 for FFHQ at 1024x1024 resolution using 8 GPUs.
-    python train.py --outdir=~/training-runs --cfg=stylegan2 --data=~/datasets/ffhq-1024x1024.zip \\
-        --gpus=8 --batch=32 --gamma=10 --mirror=1 --aug=noaug
     """
 
     # Initialize config.
