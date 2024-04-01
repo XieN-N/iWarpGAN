@@ -463,6 +463,90 @@ class SynthesisBlock(torch.nn.Module):
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
+class SynthesisInput(torch.nn.Module):
+    def __init__(self,
+        w_dim,          # Intermediate latent (W) dimensionality.
+        channels,       # Number of output channels.
+        size,           # Output spatial size: int or [width, height].
+        sampling_rate,  # Output sampling rate.
+        bandwidth,      # Output bandwidth.
+    ):
+        super().__init__()
+        self.w_dim = w_dim
+        self.channels = channels
+        self.size = np.broadcast_to(np.asarray(size), [2])
+        self.sampling_rate = sampling_rate
+        self.bandwidth = bandwidth
+
+        # Draw random frequencies from uniform 2D disc.
+        freqs = torch.randn([self.channels, 2])
+        radii = freqs.square().sum(dim=1, keepdim=True).sqrt()
+        freqs /= radii * radii.square().exp().pow(0.25)
+        freqs *= bandwidth
+        phases = torch.rand([self.channels]) - 0.5
+
+        # Setup parameters and buffers.
+        self.weight = torch.nn.Parameter(torch.randn([self.channels, self.channels]))
+        self.affine = FullyConnectedLayer(w_dim, 4, bias_init=1)
+        self.register_buffer('transform', torch.eye(3, 3)) # User-specified inverse transform wrt. resulting image.
+        self.register_buffer('freqs', freqs)
+        self.register_buffer('phases', phases)
+
+    def forward(self, w):
+        # Introduce batch dimension.
+        transforms = self.transform.unsqueeze(0) # [batch, row, col]
+        freqs = self.freqs.unsqueeze(0) # [batch, channel, xy]
+        phases = self.phases.unsqueeze(0) # [batch, channel]
+
+        # Apply learned transformation.
+        t = self.affine(w) # t = (r_c, r_s, t_x, t_y)
+        t = t / t[:, :2].norm(dim=1, keepdim=True) # t' = (r'_c, r'_s, t'_x, t'_y)
+        m_r = torch.eye(3, device=w.device).unsqueeze(0).repeat([w.shape[0], 1, 1]) # Inverse rotation wrt. resulting image.
+        m_r[:, 0, 0] = t[:, 0]  # r'_c
+        m_r[:, 0, 1] = -t[:, 1] # r'_s
+        m_r[:, 1, 0] = t[:, 1]  # r'_s
+        m_r[:, 1, 1] = t[:, 0]  # r'_c
+        m_t = torch.eye(3, device=w.device).unsqueeze(0).repeat([w.shape[0], 1, 1]) # Inverse translation wrt. resulting image.
+        m_t[:, 0, 2] = -t[:, 2] # t'_x
+        m_t[:, 1, 2] = -t[:, 3] # t'_y
+        transforms = m_r @ m_t @ transforms # First rotate resulting image, then translate, and finally apply user-specified transform.
+
+        # Transform frequencies.
+        phases = phases + (freqs @ transforms[:, :2, 2:]).squeeze(2)
+        freqs = freqs @ transforms[:, :2, :2]
+
+        # Dampen out-of-band frequencies that may occur due to the user-specified transform.
+        amplitudes = (1 - (freqs.norm(dim=2) - self.bandwidth) / (self.sampling_rate / 2 - self.bandwidth)).clamp(0, 1)
+
+        # Construct sampling grid.
+        theta = torch.eye(2, 3, device=w.device)
+        theta[0, 0] = 0.5 * self.size[0] / self.sampling_rate
+        theta[1, 1] = 0.5 * self.size[1] / self.sampling_rate
+        grids = torch.nn.functional.affine_grid(theta.unsqueeze(0), [1, 1, self.size[1], self.size[0]], align_corners=False)
+
+        # Compute Fourier features.
+        x = (grids.unsqueeze(3) @ freqs.permute(0, 2, 1).unsqueeze(1).unsqueeze(2)).squeeze(3) # [batch, height, width, channel]
+        x = x + phases.unsqueeze(1).unsqueeze(2)
+        x = torch.sin(x * (np.pi * 2))
+        x = x * amplitudes.unsqueeze(1).unsqueeze(2)
+
+        # Apply trainable mapping.
+        weight = self.weight / np.sqrt(self.channels)
+        x = x @ weight.t()
+
+        # Ensure correct shape.
+        x = x.permute(0, 3, 1, 2) # [batch, channel, height, width]
+        misc.assert_shape(x, [w.shape[0], self.channels, int(self.size[1]), int(self.size[0])])
+        return x
+
+    def extra_repr(self):
+        return '\n'.join([
+            f'w_dim={self.w_dim:d}, channels={self.channels:d}, size={list(self.size)},',
+            f'sampling_rate={self.sampling_rate:g}, bandwidth={self.bandwidth:g}'])
+
+#----------------------------------------------------------------------------
+
+@persistence.persistent_class
 class SynthesisNetwork(torch.nn.Module):
     def __init__(self,
         w_dim,                      # Intermediate latent (W) dimensionality.
@@ -471,6 +555,12 @@ class SynthesisNetwork(torch.nn.Module):
         channel_base    = 32768,    # Overall multiplier for the number of channels.
         channel_max     = 512,      # Maximum number of channels in any layer.
         num_fp16_res    = 4,        # Use FP16 for the N highest resolutions.
+        num_layers      = 14,       # Total number of layers, excluding Fourier features and ToRGB.
+        num_critical    = 2,        # Number of critically sampled layers at the end.
+        margin_size     = 10,       # Number of additional pixels outside the image.
+        first_cutoff    = 2,        # Cutoff frequency of the first layer (f_{c,0}).
+        first_stopband  = 2**2.1,   # Minimum stopband of the first layer (f_{t,0}).
+        last_stopband_rel   = 2**0.3,   # Minimum stopband of the last layer, expressed relative to the cutoff.
         **block_kwargs,             # Arguments for SynthesisBlock.
     ):
         assert img_resolution >= 4 and img_resolution & (img_resolution - 1) == 0
@@ -480,9 +570,31 @@ class SynthesisNetwork(torch.nn.Module):
         self.img_resolution_log2 = int(np.log2(img_resolution))
         self.img_channels = img_channels
         self.num_fp16_res = num_fp16_res
+        self.num_layers = num_layers
+        self.num_critical = num_critical
+        self.margin_size = margin_size
         self.block_resolutions = [2 ** i for i in range(2, self.img_resolution_log2 + 1)]
         channels_dict = {res: min(channel_base // res, channel_max) for res in self.block_resolutions}
         fp16_resolution = max(2 ** (self.img_resolution_log2 + 1 - num_fp16_res), 8)
+
+        # Geometric progression of layer cutoffs and min. stopbands.
+        last_cutoff = self.img_resolution / 2 # f_{c,N}
+        last_stopband = last_cutoff * last_stopband_rel # f_{t,N}
+        exponents = np.minimum(np.arange(self.num_layers + 1) / (self.num_layers - self.num_critical), 1)
+        cutoffs = first_cutoff * (last_cutoff / first_cutoff) ** exponents # f_c[i]
+        stopbands = first_stopband * (last_stopband / first_stopband) ** exponents # f_t[i]
+
+        # Compute remaining layer parameters.
+        sampling_rates = np.exp2(np.ceil(np.log2(np.minimum(stopbands * 2, self.img_resolution)))) # s[i]
+        half_widths = np.maximum(stopbands, sampling_rates / 2) - cutoffs # f_h[i]
+        sizes = sampling_rates + self.margin_size * 2
+        sizes[-2:] = self.img_resolution
+        channels = np.rint(np.minimum((channel_base / 2) / cutoffs, channel_max))
+        channels[-1] = self.img_channels
+
+        self.input = SynthesisInput(
+            w_dim=self.w_dim, channels=int(channels[0]), size=int(sizes[0]),
+            sampling_rate=sampling_rates[0], bandwidth=cutoffs[0])
 
         self.num_ws = 0
         for res in self.block_resolutions:
@@ -499,16 +611,21 @@ class SynthesisNetwork(torch.nn.Module):
 
     def forward(self, ws, **block_kwargs):
         block_ws = []
+
+        #pdb.set_trace()
         with torch.autograd.profiler.record_function('split_ws'):
             misc.assert_shape(ws, [None, self.num_ws, self.w_dim])
             ws = ws.to(torch.float32)
+            x = self.input(ws[0])
+
             w_idx = 0
             for res in self.block_resolutions:
                 block = getattr(self, f'b{res}')
                 block_ws.append(ws.narrow(1, w_idx, block.num_conv + block.num_torgb))
                 w_idx += block.num_conv
-
-        x = img = None
+        
+        #pdb.set_trace()
+        img = None
         for res, cur_ws in zip(self.block_resolutions, block_ws):
             block = getattr(self, f'b{res}')
             x, img = block(x, img, cur_ws, **block_kwargs)
@@ -874,13 +991,16 @@ class IDNetwork(torch.nn.Module):
     
     def forward(self, img, x2):
         # Expand dimensions of labels to match the image size
-        #pdb.set_trace()
 
         # Convolutional layers
         x1 = self.conv_blocks(img)
+        x1 = x1.view(x1.size(0), -1)
         #x1 = self.fc(x1.squeeze())
 
-        combined_encoding = torch.cat((x2, x1.squeeze()), dim=1)
+        #pdb.set_trace()
+
+        combined_encoding = torch.cat((x2, x1), dim=1)
+        #combined_encoding = torch.cat((x2, x1.squeeze()), dim=1)
         combined_encoding = self.add_randomness(combined_encoding)
         #combined_encoding = x1
 
@@ -889,6 +1009,73 @@ class IDNetwork(torch.nn.Module):
         #x2 = torch.nn.functional.normalize(x2, p=2, dim=1)
 
         return combined_encoding
+
+#----------------------------------------------------------------------------
+'''
+@persistence.persistent_class
+class StyleNetwork(torch.nn.Module):
+    def __init__(self,
+        c_dim,                          # Conditioning label (C) dimensionality.
+        z_dim,
+        w_dim,
+        img_resolution,                 # Input resolution.
+        img_channels,                   # Number of input color channels.
+        use_es,
+        use_ed,
+        mapping_kwargs={},
+        num_ws = 1
+    ):
+        super().__init__()
+        self.c_dim = c_dim
+        self.w_dim = w_dim
+        self.img_resolution = img_resolution
+        self.img_resolution_log2 = int(np.log2(img_resolution))
+        self.img_channels = img_channels
+        self.z_dim = z_dim
+
+        self.image_encoder = torch.nn.Sequential(
+            torch.nn.Conv2d(self.img_channels, 64, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.MaxPool2d(kernel_size=2, stride=2),
+            torch.nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.MaxPool2d(kernel_size=2, stride=2),
+            torch.nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.MaxPool2d(kernel_size=2, stride=2),
+            torch.nn.AdaptiveAvgPool2d(1)
+        )
+
+        self.label_encoder = torch.nn.Sequential(
+            torch.nn.Linear(self.c_dim, 128),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(128, 64),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(64, self.c_dim),
+            torch.nn.ReLU(inplace=True)
+        )
+
+        self.fc = torch.nn.Linear(self.z_dim // 2 + self.c_dim, self.z_dim // 2)
+        #self.fc = torch.nn.Linear(self.z_dim // 2, self.z_dim // 2)
+
+    def forward(self, image, label):
+        image_encoding = self.image_encoder(image)
+        image_encoding = image_encoding.view(image_encoding.size(0), -1)
+        
+        label_encoding = self.label_encoder(label)
+        
+        combined_encoding = torch.cat((image_encoding, label_encoding), dim=1)
+        
+        combined_encoding = self.fc(combined_encoding)
+        
+        return combined_encoding
+'''
 
 #----------------------------------------------------------------------------
 
@@ -957,5 +1144,184 @@ class StyleNetwork(torch.nn.Module):
         #torch.nn.functional.normalize(combined_encoding, p=2, dim=1)
         
         return combined_encoding
+
+#----------------------------------------------------------------------------
+class SupportSets(torch.nn.Module):
+    def __init__(self,
+        c_dim,                          # Conditioning label (C) dimensionality.
+        z_dim,
+        w_dim,
+        img_resolution,                 # Input resolution.
+        img_channels,                   # Number of input color channels.
+        use_es,
+        use_ed,
+        reconstructor_type,
+        gamma,
+        num_support_sets, 
+        num_support_dipoles, 
+        support_vectors_dim=256,
+        learn_alphas=False, 
+        learn_gammas=False, 
+    ):
+        """SupportSets class constructor.
+
+        Args:
+            num_support_sets (int)    : number of support sets (each one defining a warping function)
+            num_support_dipoles (int) : number of support dipoles per support set (per warping function)
+            support_vectors_dim (int) : dimensionality of support vectors (latent space dimensionality, z_dim)
+            learn_alphas (bool)       : learn RBF alphas
+            learn_gammas (bool)       : learn RBF gammas
+            gamma (float)             : RBF gamma parameter (by default set to the inverse of the latent space
+                                        dimensionality)
+        """
+        super().__init__()
+        self.num_support_sets = num_support_sets
+        self.num_support_dipoles = num_support_dipoles
+        self.support_vectors_dim = support_vectors_dim
+        self.learn_alphas = learn_alphas
+        self.learn_gammas = learn_gammas
+        self.gamma = gamma
+        self.loggamma = torch.log(torch.scalar_tensor(self.gamma))
+
+        ################################################################################################################
+        ##                                                                                                            ##
+        ##                                        [ SUPPORT_SETS: (K, N, d) ]                                         ##
+        ##                                                                                                            ##
+        ################################################################################################################
+        # Define learnable parameters ofr RBF support sets:
+        #   K sets of N pairs of d-dimensional (antipodal) support vector sets
+        self.SUPPORT_SETS = torch.nn.Parameter(data=torch.ones(self.num_support_sets,
+                                                         2 * self.num_support_dipoles * self.support_vectors_dim),
+                                         requires_grad=True)
+        # Initialize support sets
+        self.r_min = 1.0
+        self.r_max = 4.0
+        self.radii = torch.arange(self.r_min, self.r_max, (self.r_max - self.r_min) / self.num_support_sets)
+        SUPPORT_SETS = torch.zeros(self.num_support_sets, 2 * self.num_support_dipoles, self.support_vectors_dim)
+        for k in range(self.num_support_sets):
+            SV_set = []
+            for i in range(self.num_support_dipoles):
+                SV = torch.randn(1, self.support_vectors_dim)
+                SV_set.extend([SV, -SV])
+            SV_set = torch.cat(SV_set)
+            SV_set = self.radii[k] * SV_set / torch.norm(SV_set, dim=1, keepdim=True)
+            SUPPORT_SETS[k, :] = SV_set
+
+        # Reshape support sets tensor into a matrix and initialize support sets matrix
+        self.SUPPORT_SETS.data = SUPPORT_SETS.reshape(self.num_support_sets,
+                                                      2 * self.num_support_dipoles * self.support_vectors_dim).clone()
+        # ************************************************************************************************************ #
+
+        ################################################################################################################
+        ##                                                                                                            ##
+        ##                                            [ ALPHAS: (K, N) ]                                              ##
+        ##                                                                                                            ##
+        ################################################################################################################
+        # Define alphas as parameters (learnable or non-learnable)
+        self.ALPHAS = torch.nn.Parameter(data=torch.zeros(self.num_support_sets, 2 * self.num_support_dipoles),
+                                   requires_grad=self.learn_alphas)
+        # Initialize alphas
+        for k in range(self.num_support_sets):
+            a = []
+            for _ in range(self.num_support_dipoles):
+                a.extend([1, -1])
+            self.ALPHAS.data[k] = torch.Tensor(a)
+
+        ################################################################################################################
+        ##                                                                                                            ##
+        ##                                            [ GAMMAS: (K, N) ]                                              ##
+        ##                                                                                                            ##
+        ################################################################################################################
+        # Define RBF gammas and initialize
+        self.LOGGAMMA = torch.nn.Parameter(data=self.loggamma * torch.ones(self.num_support_sets, 1),
+                                     requires_grad=self.learn_gammas)
+
+    def forward(self, support_sets_mask, z):
+        # Get RBF support sets batch
+        #pdb.set_trace()
+        support_sets_batch = torch.matmul(support_sets_mask, self.SUPPORT_SETS)
+        support_sets_batch = support_sets_batch.reshape(-1, 2 * self.num_support_dipoles, self.support_vectors_dim)
+
+        # Get batch of RBF alpha parameters
+        alphas_batch = torch.matmul(support_sets_mask, self.ALPHAS).unsqueeze(dim=2)
+
+        # Get batch of RBF gamma/log(gamma) parameters
+        if self.learn_gammas:
+            gammas_batch = torch.exp(torch.matmul(support_sets_mask, self.LOGGAMMA).unsqueeze(dim=2))
+        else:
+            gammas_batch = (self.gamma * torch.ones(z.size()[0], 2 * self.num_support_dipoles, 1)).to(device=alphas_batch.device)
+            #gammas_batch.to(device=alphas_batch.device)
+
+        # Calculate grad of f at z
+        D = z.unsqueeze(dim=1).repeat(1, 2 * self.num_support_dipoles, 1) - support_sets_batch
+        #D.to(device=alphas_batch.device)
+        grad_f = -2 * (alphas_batch * gammas_batch * torch.exp(-gammas_batch * (torch.norm(D, dim=2) ** 2).unsqueeze(dim=2)) * D).sum(dim=1)
+
+        # Return normalized grad of f at z
+        #return grad_f / torch.norm(grad_f, dim=1, keepdim=True)
+        return grad_f
+
+def save_hook(module, input, output):
+    setattr(module, 'output', output)
+
+#----------------------------------------------------------------------------
+
+class Reconstructor(torch.nn.Module):
+    def __init__(self,
+        c_dim,                          # Conditioning label (C) dimensionality.
+        z_dim,
+        w_dim,
+        img_resolution,                 # Input resolution.
+        img_channels,                   # Number of input color channels.
+        use_es,
+        use_ed,
+        num_support_sets,
+        num_support_dipoles,
+        learn_alphas, 
+        learn_gammas, 
+        reconstructor_type,
+    ):
+        super().__init__()
+        self.reconstructor_type = reconstructor_type
+        self.dim = num_support_sets
+        self.channels = img_channels
+
+        # === LeNet ===
+        # Define LeNet backbone for feature extraction
+        self.lenet_width = 2
+        self.feature_extractor = torch.nn.Sequential(
+            torch.nn.Conv2d(self.channels * 2, 3 * self.lenet_width, kernel_size=(5, 5)),
+            torch.nn.BatchNorm2d(3 * self.lenet_width),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=2),
+            torch.nn.Conv2d(3 * self.lenet_width, 8 * self.lenet_width, kernel_size=(5, 5)),
+            torch.nn.BatchNorm2d(8 * self.lenet_width),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=(2, 2), stride=2),
+            torch.nn.Conv2d(8 * self.lenet_width, 60 * self.lenet_width, kernel_size=(5, 5)),
+            torch.nn.BatchNorm2d(60 * self.lenet_width),
+            torch.nn.ReLU()
+        )
+
+        # Define classification head (for predicting warping functions (paths) indices)
+        self.path_indices = torch.nn.Sequential(
+            torch.nn.Linear(60 * self.lenet_width, 42 * self.lenet_width),
+            torch.nn.BatchNorm1d(42 * self.lenet_width),
+            torch.nn.ReLU(),
+            torch.nn.Linear(42 * self.lenet_width, self.dim)
+        )
+
+        # Define regression head (for predicting shift magnitudes)
+        self.shift_magnitudes = torch.nn.Sequential(
+            torch.nn.Linear(60 * self.lenet_width, 42 * self.lenet_width),
+            torch.nn.BatchNorm1d(42 * self.lenet_width),
+            torch.nn.ReLU(),
+            torch.nn.Linear(42 * self.lenet_width, 1)
+        )
+
+    def forward(self, x1, x2):
+        features = self.feature_extractor(torch.cat([x1, x2], dim=1))
+        features = features.mean(dim=[-1, -2]).view(x1.shape[0], -1)
+        return self.path_indices(features), self.shift_magnitudes(features).squeeze()
 
 #----------------------------------------------------------------------------
