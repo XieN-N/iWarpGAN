@@ -177,8 +177,8 @@ def parse_comma_separated_list(s):
 @click.option('--desc',         help='String to include in result dir name', metavar='STR',     type=str)
 @click.option('--metrics',      help='Quality metrics', metavar='[NAME|A,B,C|none]',            type=parse_comma_separated_list, default='fid50k_full', show_default=True)
 @click.option('--kimg',         help='Total training duration', metavar='KIMG',                 type=click.IntRange(min=1), default=25000, show_default=True)
-@click.option('--tick',         help='How often to print progress', metavar='KIMG',             type=click.IntRange(min=1), default=1, show_default=True)
-@click.option('--snap',         help='How often to save snapshots', metavar='TICKS',            type=click.IntRange(min=1), default=10, show_default=True)
+@click.option('--tick',         help='How often to print progress', metavar='KIMG',             type=click.IntRange(min=1), default=5, show_default=True)
+@click.option('--snap',         help='How often to save snapshots', metavar='TICKS',            type=click.IntRange(min=1), default=20, show_default=True)
 @click.option('--seed',         help='Random seed', metavar='INT',                              type=click.IntRange(min=0), default=0, show_default=True)
 @click.option('--fp32',         help='Disable mixed-precision', metavar='BOOL',                 type=bool, default=False, show_default=True)
 @click.option('--nobench',      help='Disable cuDNN benchmarking', metavar='BOOL',              type=bool, default=False, show_default=True)
@@ -218,12 +218,12 @@ def main(**kwargs):
                                     learn_alphas = opts.learn_alphas, learn_gammas = opts.learn_gammas, 
                                     reconstructor_type = opts.reconstructor_type
                                 )
-    c.RC_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan3.Reconstructor', w_dim=512, z_dim=512, 
+    c.RC_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.Reconstructor', w_dim=512, z_dim=512, 
                                     num_support_sets = opts.num_support_sets, num_support_dipoles = opts.num_support_dipoles,
                                     learn_alphas = opts.learn_alphas, learn_gammas = opts.learn_gammas, 
                                     reconstructor_type = opts.reconstructor_type
                                 )
-    c.SP_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan3.SupportSets', w_dim=512, z_dim=512, 
+    c.SP_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.SupportSets', w_dim=512, z_dim=512, 
                                     num_support_sets = opts.num_support_sets, num_support_dipoles = opts.num_support_dipoles,
                                     learn_alphas = opts.learn_alphas, learn_gammas = opts.learn_gammas, 
                                     reconstructor_type = opts.reconstructor_type, gamma=opts.gamma
@@ -258,12 +258,12 @@ def main(**kwargs):
     c.batch_gpu = opts.batch_gpu or opts.batch // opts.gpus
     c.G_kwargs.channel_base = c.D_kwargs.channel_base = opts.cbase
     c.G_kwargs.channel_max = c.D_kwargs.channel_max = opts.cmax
-    c.G_kwargs.mapping_kwargs.num_layers = (8 if opts.cfg == 'stylegan2' else 2) if opts.map_depth is None else opts.map_depth
-    c.ES_kwargs.mapping_kwargs.num_layers = (8 if opts.cfg == 'stylegan2' else 2) if opts.map_depth is None else opts.map_depth
+    c.G_kwargs.mapping_kwargs.num_layers = (2 if opts.cfg == 'stylegan2' else 8) if opts.map_depth is None else opts.map_depth
+    c.ES_kwargs.mapping_kwargs.num_layers = (2 if opts.cfg == 'stylegan2' else 8) if opts.map_depth is None else opts.map_depth
     c.D_kwargs.block_kwargs.freeze_layers = opts.freezed
     c.D_kwargs.epilogue_kwargs.mbstd_group_size = opts.mbstd_group
     c.loss_kwargs.r1_gamma = opts.gamma
-    c.G_opt_kwargs.lr = (0.002 if opts.cfg == 'stylegan2' else 0.0025) if opts.glr is None else opts.glr
+    c.G_opt_kwargs.lr = (0.0025 if opts.cfg == 'stylegan2' else 0.002) if opts.glr is None else opts.glr
     c.D_opt_kwargs.lr = opts.dlr
     c.ES_opt_kwargs.lr = opts.dlr
     c.ED_opt_kwargs.lr = opts.dlr
@@ -288,23 +288,15 @@ def main(**kwargs):
 
     # Base configuration.
     c.ema_kimg = c.batch_size * 10 / 32
-    if opts.cfg == 'stylegan2':
-        c.G_kwargs.class_name = 'training.networks_stylegan2.Generator'
-        c.loss_kwargs.style_mixing_prob = 0.9 # Enable style mixing regularization.
-        c.loss_kwargs.pl_weight = 2 # Enable path length regularization.
-        c.G_reg_interval = 4 # Enable lazy regularization for G.
-        c.G_kwargs.fused_modconv_default = 'inference_only' # Speed up training by using regular convolutions instead of grouped convolutions.
-        c.loss_kwargs.pl_no_weight_grad = True # Speed up path length regularization by skipping gradient computation wrt. conv2d weights.
-    else:
-        c.G_kwargs.class_name = 'training.networks_stylegan3.Generator'
-        c.G_kwargs.magnitude_ema_beta = 0.5 ** (c.batch_size / (20 * 1e3))
-        if opts.cfg == 'stylegan3-r':
-            c.G_kwargs.conv_kernel = 1 # Use 1x1 convolutions.
-            c.G_kwargs.channel_base *= 2 # Double the number of feature maps.
-            c.G_kwargs.channel_max *= 2
-            c.G_kwargs.use_radial_filters = True # Use radially symmetric downsampling filters.
-            c.loss_kwargs.blur_init_sigma = 10 # Blur the images seen by the discriminator.
-            c.loss_kwargs.blur_fade_kimg = c.batch_size * 200 / 32 # Fade out the blur during the first N kimg.
+    c.G_kwargs.class_name = 'training.networks_stylegan3.Generator'
+    c.G_kwargs.magnitude_ema_beta = 0.5 ** (c.batch_size / (20 * 1e3))
+    if opts.cfg == 'stylegan3-r':
+        c.G_kwargs.conv_kernel = 1 # Use 1x1 convolutions.
+        c.G_kwargs.channel_base *= 2 # Double the number of feature maps.
+        c.G_kwargs.channel_max *= 2
+        c.G_kwargs.use_radial_filters = True # Use radially symmetric downsampling filters.
+        c.loss_kwargs.blur_init_sigma = 10 # Blur the images seen by the discriminator.
+        c.loss_kwargs.blur_fade_kimg = c.batch_size * 200 / 32 # Fade out the blur during the first N kimg.
 
     # Augmentation.
     if opts.aug != 'noaug':
