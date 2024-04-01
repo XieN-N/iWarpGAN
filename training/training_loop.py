@@ -172,6 +172,7 @@ def training_loop(
     #print('Build G')
     common_kwargs = dict(use_es=use_es, use_ed=use_ed, c_dim=training_set.label_dim, img_resolution=training_set.resolution, img_channels=training_set.num_channels)
     G = dnnlib.util.construct_class_by_name(**G_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
+    G_ema = copy.deepcopy(G).eval()
     #print('Build D')
     D = dnnlib.util.construct_class_by_name(**D_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     if use_es:
@@ -191,7 +192,6 @@ def training_loop(
     else:
         SP = None
         RC = None
-    G_ema = copy.deepcopy(G).eval()
 
     # Resume from existing pickle.
     #pdb.set_trace()
@@ -199,13 +199,10 @@ def training_loop(
         print(f'Resuming from "{resume_pkl}"')
         with dnnlib.util.open_url(resume_pkl) as f:
             resume_data = legacy.load_network_pkl(f)
-        if use_es and use_ed and use_warp and first_enc:
+        if first_enc:
             mdd = [('G', G), ('D', D), ('G_ema', G_ema)]
-        elif use_es and use_ed and use_warp and not first_enc:
-            #mdd = [('ES', ES), ('ED', ED), ('G', G), ('D', D), ('G_ema', G_ema)]
+        elif use_es and use_ed and use_warp:
             mdd = [('ES', ES), ('ED', ED), ('RC', RC), ('SP', SP), ('G', G), ('D', D), ('G_ema', G_ema)]
-        elif use_es and use_ed and first_enc:
-            mdd = [('G', G), ('D', D), ('G_ema', G_ema)]
         elif use_es and use_ed and not first_enc:
             mdd = [('ES', ES), ('ED', ED), ('G', G), ('D', D), ('G_ema', G_ema)]
             #mdd = [('ES', ES), ('G', G), ('D', D), ('G_ema', G_ema)]
