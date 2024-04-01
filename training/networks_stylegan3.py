@@ -125,7 +125,7 @@ class MappingNetwork(torch.nn.Module):
         self.num_layers = num_layers
         self.w_avg_beta = w_avg_beta
         self.use_es = use_es
-        self.use_ed = use_ed
+        self.use_ed = use_es
 
         # Construct layers.
         self.embed = FullyConnectedLayer(self.c_dim, 32) if self.c_dim > 0 else None
@@ -675,87 +675,8 @@ class Reconstructor(torch.nn.Module):
         features = features.mean(dim=[-1, -2]).view(x1.shape[0], -1)
         return self.path_indices(features), self.shift_magnitudes(features).squeeze()
 
-
-@persistence.persistent_class
-class IDNetwork(torch.nn.Module):
-    def __init__(self,
-        c_dim,                          # Conditioning label (C) dimensionality.
-        z_dim,
-        w_dim,
-        img_resolution,                 # Input resolution.
-        img_channels,                   # Number of input color channels.
-        use_es,
-        use_ed,
-        num_support_sets,
-        num_support_dipoles,
-        learn_alphas, 
-        learn_gammas, 
-        reconstructor_type,
-    ):
-        super().__init__()
-        self.c_dim = c_dim
-        self.w_dim = w_dim
-        self.img_resolution = img_resolution
-        self.img_resolution_log2 = int(np.log2(img_resolution))
-        self.img_channels = img_channels
-        self.z_dim = z_dim
-        self.num_support_sets = num_support_sets
-        self.num_support_dipoles = num_support_dipoles
-        self.learn_alphas = learn_alphas
-        self.learn_gammas = learn_gammas
-        self.reconstructor_type = reconstructor_type
-
-        # Convolutional layers
-        self.conv_blocks = torch.nn.Sequential(
-            torch.nn.Conv2d(self.img_channels, 64, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.MaxPool2d(kernel_size=2, stride=2),
-            torch.nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.MaxPool2d(kernel_size=2, stride=2),
-            torch.nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(256, self.z_dim // 4, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.MaxPool2d(kernel_size=2, stride=2),
-            torch.nn.AdaptiveAvgPool2d(1)
-        )
-
-        self.add_randomness = torch.nn.Linear(self.z_dim // 2 + self.z_dim // 4, self.z_dim //2)
-
-        #self.S = SupportSets(num_support_sets=self.num_support_sets,
-        #            num_support_dipoles=self.num_support_dipoles,
-        #            support_vectors_dim=self.z_dim//2,
-        #            learn_alphas=self.learn_alphas,
-        #            learn_gammas=self.learn_gammas,
-        #            gamma=1.0 / (self.z_dim//2) if self.learn_gamma is None else 0.001)
-    
-    def forward(self, img, c, x2):
-        # Expand dimensions of labels to match the image size
-        #pdb.set_trace()
-
-        # Convolutional layers
-        x1 = self.conv_blocks(img)
-        #x1 = self.fc(x1.squeeze())
-
-        combined_encoding = torch.cat((x2, x1.squeeze()), dim=1)
-        combined_encoding = self.add_randomness(combined_encoding)
-        #combined_encoding = x1
-
-        #shift = trg_shift_magnitude.reshape(-1, 1) * self.S(supp_sets_mask, x1)
-        #x2 = x1 + shift
-        #x2 = torch.nn.functional.normalize(x2, p=2, dim=1)
-
-        return combined_encoding
-
 #----------------------------------------------------------------------------
-
-#----------------------------------------------------------------------------
-
+'''
 @persistence.persistent_class
 class StyleNetwork(torch.nn.Module):
     def __init__(self,
@@ -817,6 +738,73 @@ class StyleNetwork(torch.nn.Module):
         combined_encoding = self.fc(combined_encoding)
         
         return torch.nn.functional.normalize(combined_encoding, p=2, dim=1)
+'''
+
+@persistence.persistent_class
+class StyleNetwork(torch.nn.Module):
+    def __init__(self,
+        c_dim,                          # Conditioning label (C) dimensionality.
+        z_dim,
+        w_dim,
+        img_resolution,                 # Input resolution.
+        img_channels,                   # Number of input color channels.
+        use_es,
+        use_ed,
+        mapping_kwargs={},
+        num_ws = 1
+    ):
+        super().__init__()
+        self.c_dim = c_dim
+        self.w_dim = w_dim
+        self.num_ws = num_ws
+        self.img_resolution = img_resolution
+        self.img_resolution_log2 = int(np.log2(img_resolution))
+        self.img_channels = img_channels
+        self.z_dim = z_dim
+        self.mapping = MappingNetwork(z_dim=z_dim//2, c_dim=c_dim, w_dim=w_dim//2, num_ws=self.num_ws, **mapping_kwargs)
+
+        self.image_encoder = torch.nn.Sequential(
+            torch.nn.Conv2d(self.img_channels, 64, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.MaxPool2d(kernel_size=2, stride=2),
+            torch.nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.MaxPool2d(kernel_size=2, stride=2),
+            torch.nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.MaxPool2d(kernel_size=2, stride=2),
+            torch.nn.AdaptiveAvgPool2d(1)
+        )
+
+        self.label_encoder = torch.nn.Sequential(
+            torch.nn.Linear(self.c_dim, 128),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(128, 64),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(64, self.c_dim),
+            torch.nn.ReLU(inplace=True)
+        )
+
+        self.fc = torch.nn.Linear(self.z_dim // 2 + self.c_dim, self.z_dim // 2)
+        #self.fc = torch.nn.Linear(self.z_dim // 2, self.z_dim // 2)
+
+    def forward(self, image, label, truncation_psi=1, truncation_cutoff=None, update_emas=False):
+        #pdb.set_trace()
+        image_encoding = self.image_encoder(image)
+        image_encoding = image_encoding.view(image_encoding.size(0), -1)
+        
+        combined_encoding = self.mapping(image_encoding, label, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff, update_emas=update_emas)
+        combined_encoding = combined_encoding.view(combined_encoding.size(0), -1)
+        #combined_encoding = self.fc(combined_encoding)
+        #torch.nn.functional.normalize(combined_encoding, p=2, dim=1)
+        
+        return combined_encoding
 
 #----------------------------------------------------------------------------
 
@@ -922,7 +910,7 @@ class Generator(torch.nn.Module):
         self.img_channels = img_channels
         self.synthesis = SynthesisNetwork(w_dim=w_dim, c_dim=c_dim, img_resolution=img_resolution, img_channels=img_channels, **synthesis_kwargs)
         self.num_ws = self.synthesis.num_ws
-        self.mapping = MappingNetwork(use_es=use_es, use_ed=use_ed, z_dim=z_dim, c_dim=c_dim, w_dim=w_dim, num_ws=self.num_ws, **mapping_kwargs)
+        self.mapping = MappingNetwork(use_es=False, use_ed=False, z_dim=z_dim, c_dim=c_dim, w_dim=w_dim, num_ws=self.num_ws, **mapping_kwargs)
 
     def forward(self, z, c, truncation_psi=1, truncation_cutoff=None, update_emas=False, **synthesis_kwargs):
         #pdb.set_trace()
