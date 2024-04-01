@@ -39,7 +39,7 @@ python dataset_tool.py --source=./image-folder/ --dest=./prc_folder
 
 ## Training
 
-Since this work aims to manipulate the latent space of a Generator, first start with a pre-trained Generator. We have utilized stylegan-2 as our backbone network, but you can use any network of your choice.
+Since this work aims to manipulate the latent space of a Generator, first we start with training a Generator to generate iris images. We have utilized stylegan-2 as our backbone network, but you can use any network of your choice.
 
 ```.bash
 # To obtain stylegan-2 pre-trained on iris datasets:
