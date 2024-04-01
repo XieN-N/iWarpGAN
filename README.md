@@ -45,7 +45,7 @@ Since this work aims to manipulate the latent space of a Generator, first start 
 # To obtain stylegan-2 pre-trained on iris datasets:
 python train.py --outdir=./outdir/ --cfg=stylegan2 --data=./prc_folder --gpus=n-gpus --batch=n-batch --gamma=8.2 --cond True --metrics=none
 
-# Train iWaprGAN
+# Train iWarpGAN
 python train.py --outdir=./outdir/ --cfg=stylegan2 --data=./prc_folder --use_es=True --use_ed=True --use_warp=True --first_enc=True --gpus=n-gpus --batch=n-batch --gamma=8.2 --cond=True —resume=./pre-trained_stylegan2 --metrics=none
 
 ```
