@@ -63,7 +63,7 @@ Pre-trained networks are stored as `*.pkl` files that can be found here: https:/
 
 ```.bash
 # Generate an image using trained model
-python gen_images.py --outdir=out --data=test_data --use_ed=True --use_es=True --use_warp=True --resume=model_name.pkl
+python gen_images.py --outdir=out --data=test_data --resume=model_name.pkl
 
 ```
 The pre-trained networks and some generated images can be found here.
