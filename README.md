@@ -80,11 +80,13 @@ References:
 ## Citation
 
 ```
-@article{yadav2023,
-  title={{iWarpGAN: Disentangling Identity and Style to Generate Synthetic Iris Images}},
+@inproceedings{yadav2023iwarpgan,
+  title={iWarpGAN: Disentangling Identity and Style to Generate Synthetic Iris Images},
   author={Yadav, Shivangi and Ross, Arun},
-  journal={arXiv preprint arXiv:2305.12596},
-  year={2023}
+  booktitle={2023 IEEE International Joint Conference on Biometrics (IJCB)},
+  pages={1--10},
+  year={2023},
+  organization={IEEE}
 }
 ```
 
