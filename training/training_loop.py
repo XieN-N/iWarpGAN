@@ -22,7 +22,6 @@ from torch_utils.ops import grid_sample_gradfix
 
 import legacy
 from metrics import metric_main
-import pdb
 
 #----------------------------------------------------------------------------
 
@@ -109,8 +108,8 @@ def training_loop(
     random_seed             = 0,        # Global random seed.
     num_gpus                = 1,        # Number of GPUs participating in the training.
     rank                    = 0,        # Rank of the current process in [0, num_gpus[.
-    batch_size              = 4,        # Total batch size for one training iteration. Can be larger than batch_gpu * num_gpus.
-    batch_gpu               = 4,        # Number of samples processed at a time by one GPU.
+    batch_size              = 2,        # Total batch size for one training iteration.
+    batch_gpu               = 2,        # Number of samples processed at a time by one GPU.
     ema_kimg                = 10,       # Half-life of the exponential moving average (EMA) of generator weights.
     ema_rampup              = 0.05,     # EMA ramp-up coefficient. None = no rampup.
     G_reg_interval          = None,     # How often to perform regularization for G? None = disable lazy regularization.
@@ -298,7 +297,7 @@ def training_loop(
             mb_ratio = reg_interval / (reg_interval + 1)
             opt_kwargs = dnnlib.EasyDict(opt_kwargs)
             opt_kwargs.lr = opt_kwargs.lr * mb_ratio
-            opt_kwargs.betas = [beta ** mb_ratio for beta in opt_kwargs.betas]
+            opt_kwargs.betas = tuple(beta ** mb_ratio for beta in opt_kwargs.betas)
             if name == 'G_ES' and use_es:
                 opt = dnnlib.util.construct_class_by_name(params=list(G.parameters())+list(ES.parameters()), **opt_kwargs)
             if name == 'G_ED' and use_ed:

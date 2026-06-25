@@ -15,8 +15,6 @@ from torch_utils import persistence
 from torch_utils.ops import conv2d_gradfix
 from torch_utils.ops import filtered_lrelu
 from torch_utils.ops import bias_act
-import pdb
-
 #----------------------------------------------------------------------------
 
 @misc.profiled_function

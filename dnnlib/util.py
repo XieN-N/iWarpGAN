@@ -26,9 +26,10 @@ import urllib
 import urllib.request
 import uuid
 
-from distutils.util import strtobool
+def strtobool(val: str) -> bool:
+    return val.lower() in ('yes', 'true', 't', '1')
 from typing import Any, List, Tuple, Union
-import pdb
+
 
 
 # Util classes
@@ -167,7 +168,7 @@ def ask_yes_no(question: str) -> bool:
     while True:
         try:
             print("{0} [y/n]".format(question))
-            return strtobool(input().lower())
+            return strtobool(input())
         except ValueError:
             pass
 

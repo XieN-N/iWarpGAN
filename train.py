@@ -18,8 +18,6 @@ from training import training_loop
 from metrics import metric_main
 from torch_utils import training_stats
 from torch_utils import custom_ops
-import pdb
-
 #----------------------------------------------------------------------------
 
 def subprocess_fn(rank, c, temp_dir):
@@ -137,7 +135,7 @@ def parse_comma_separated_list(s):
 @click.option('-D', '--num-support-dipoles', type=int, default=4, help="set number of support dipoles per support set")
 @click.option('--learn_alphas', type=bool, default=True, help='learn RBF alpha params')
 @click.option('--learn_gammas', type=bool, default=False, help='learn RBF gamma params')
-@click.option('-g', '--gamma', type=float, default=0.001, help="set RBF gamma param; when --learn-gammas is set, this will be the initial value of gammas for all RBFs")
+@click.option('-g', '--rbf-gamma', type=float, default=0.001, help="set RBF gamma param; when --learn-gammas is set, this will be the initial value of gammas for all RBFs")
 @click.option('--support-set-lr', type=float, default=1e-4, help="set learning rate")
 @click.option('--lambda-cls', type=float, default=1.00, help="classification loss weight")
 @click.option('--lambda-reg', type=float, default=0.25, help="regression loss weight")
@@ -182,7 +180,7 @@ def parse_comma_separated_list(s):
 @click.option('--seed',         help='Random seed', metavar='INT',                              type=click.IntRange(min=0), default=0, show_default=True)
 @click.option('--fp32',         help='Disable mixed-precision', metavar='BOOL',                 type=bool, default=False, show_default=True)
 @click.option('--nobench',      help='Disable cuDNN benchmarking', metavar='BOOL',              type=bool, default=False, show_default=True)
-@click.option('--workers',      help='DataLoader worker processes', metavar='INT',              type=click.IntRange(min=1), default=24, show_default=True)
+@click.option('--workers',      help='DataLoader worker processes', metavar='INT',              type=click.IntRange(min=1), default=4, show_default=True)
 @click.option('-n','--dry-run', help='Print training options and exit',                         is_flag=True)
 
 def main(**kwargs):
@@ -206,18 +204,18 @@ def main(**kwargs):
     c.SP_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.SupportSets', w_dim=512, z_dim=512, 
                                     num_support_sets = opts.num_support_sets, num_support_dipoles = opts.num_support_dipoles,
                                     learn_alphas = opts.learn_alphas, learn_gammas = opts.learn_gammas, 
-                                    reconstructor_type = opts.reconstructor_type, gamma=opts.gamma
+                                     reconstructor_type = opts.reconstructor_type, gamma=opts.rbf_gamma
                                 )
     c.ES_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.StyleNetwork', w_dim=512, z_dim=512, mapping_kwargs=dnnlib.EasyDict())
     c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=512, w_dim=512, mapping_kwargs=dnnlib.EasyDict())
     c.D_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.Discriminator', block_kwargs=dnnlib.EasyDict(), 
                                     mapping_kwargs=dnnlib.EasyDict(), epilogue_kwargs=dnnlib.EasyDict())
-    c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.ES_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.ED_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.RC_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.SP_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
+    c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
+    c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
+    c.ES_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
+    c.ED_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
+    c.RC_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
+    c.SP_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
     c.loss_kwargs = dnnlib.EasyDict(class_name='training.loss.StyleGAN2Loss')
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
     c.use_es = opts.use_es

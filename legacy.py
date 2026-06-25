@@ -13,8 +13,6 @@ import numpy as np
 import torch
 import dnnlib
 from torch_utils import misc
-import pdb
-
 #----------------------------------------------------------------------------
 
 def load_network_pkl(f, force_fp16=False):
@@ -46,7 +44,7 @@ def load_network_pkl(f, force_fp16=False):
 
     # Force FP16.
     if force_fp16:
-        for key in ['ES', 'ED', 'G', 'D', 'G_ema', 'RC', 'SC']:
+        for key in ['ES', 'ED', 'G', 'D', 'G_ema', 'RC']:
         #for key in ['G', 'D', 'G_ema']:
             old = data[key]
             kwargs = copy.deepcopy(old.init_kwargs)

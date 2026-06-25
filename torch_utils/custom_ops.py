@@ -87,6 +87,21 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
         # machine.
         os.environ['TORCH_CUDA_ARCH_LIST'] = ''
 
+        # If using conda-forge's cuda-toolkit, CUDA headers and tools live
+        # under $CONDA_PREFIX/targets/x86_64-linux/ instead of $CUDA_HOME.
+        # Add them automatically so the user does not need manual activation
+        # scripts.
+        conda_prefix = os.environ.get('CONDA_PREFIX', '')
+        targets_include = os.path.join(conda_prefix, 'targets', 'x86_64-linux', 'include')
+        nvvm_bin = os.path.join(conda_prefix, 'nvvm', 'bin')
+        if os.path.isdir(targets_include):
+            extra_cflags = build_kwargs.setdefault('extra_cflags', [])
+            extra_cflags.insert(0, f'-I{targets_include}')
+        if os.path.isdir(nvvm_bin):
+            path = os.environ.get('PATH', '')
+            if nvvm_bin not in path:
+                os.environ['PATH'] = nvvm_bin + os.pathsep + path
+
         # Incremental build md5sum trickery.  Copies all the input source files
         # into a cached build directory under a combined md5 digest of the input
         # source files.  Copying is done only if the combined digest has changed.
@@ -128,15 +143,14 @@ def get_plugin(module_name, sources, headers=None, source_dir=None, **build_kwar
                     shutil.rmtree(tmpdir)
                     if not os.path.isdir(cached_build_dir): raise
 
-            # Compile.
+            # Compile and load.
             cached_sources = [os.path.join(cached_build_dir, os.path.basename(fname)) for fname in sources]
-            torch.utils.cpp_extension.load(name=module_name, build_directory=cached_build_dir,
+            module = torch.utils.cpp_extension.load(name=module_name, build_directory=cached_build_dir,
                 verbose=verbose_build, sources=cached_sources, **build_kwargs)
         else:
-            torch.utils.cpp_extension.load(name=module_name, verbose=verbose_build, sources=sources, **build_kwargs)
-
-        # Load.
-        module = importlib.import_module(module_name)
+            module = torch.utils.cpp_extension.load(name=module_name, verbose=verbose_build, sources=sources, **build_kwargs)
+        if isinstance(module, str):
+            module = importlib.import_module(module_name)
 
     except:
         if verbosity == 'brief':

@@ -22,10 +22,7 @@ import click
 import numpy as np
 import PIL.Image
 from tqdm import tqdm
-import pdb
 from io import StringIO
-from sklearn.preprocessing import LabelEncoder
-from sklearn.preprocessing import OneHotEncoder
 
 #----------------------------------------------------------------------------
 
@@ -68,36 +65,24 @@ def is_image_ext(fname: Union[str, Path]) -> bool:
 #----------------------------------------------------------------------------
 
 def open_image_folder(source_dir, *, max_images: Optional[int]):
-    #pdb.set_trace()
     input_images = [str(f) for f in sorted(Path(source_dir).rglob('*')) if is_image_ext(f) and os.path.isfile(f)]
 
-    # Load labels.
+    # Load labels from dataset_attributes.txt (CSV: filename,subject_id,...)
     name_labels = {}
-    count = 0
-    l_encoder = LabelEncoder()
     meta_fname = os.path.join(source_dir, 'dataset_attributes.txt')
     if os.path.isfile(meta_fname):
-        with open(meta_fname, 'r') as file:
-            for line in file:
-                if count > 0:
-                    ll = line.rstrip().split(',')
-                    
-                    label_encoder = LabelEncoder()
-                    label_encoder.fit(ll[1:])
-                    encoded_labels = label_encoder.transform(ll[1:])
-                    
-                    ll_array = np.array(encoded_labels).reshape(-1, 1)
-                    l_encoder = OneHotEncoder()
-                    lbl = l_encoder.fit_transform(ll_array)
-                    pdb.set_trace()
-                    name_labels[ll[0]] = lbl
-
-                count += 1
-    #pdb.set_trace()
+        with open(meta_fname, 'r') as f:
+            lines = [line.rstrip().split(',') for line in f if line.strip()]
+        if len(lines) > 1:
+            # header is first row; build subject_id -> integer mapping
+            subjects = sorted(set(parts[1] for parts in lines[1:] if len(parts) > 1))
+            subject_to_id = {s: i for i, s in enumerate(subjects)}
+            for parts in lines[1:]:
+                if len(parts) > 1:
+                    name_labels[parts[0]] = subject_to_id[parts[1]]
     max_idx = maybe_min(len(input_images), max_images)
 
     def iterate_images():
-        #pdb.set_trace()
         for idx, fname in enumerate(input_images):
             arch_fname = os.path.relpath(fname, source_dir)
             arch_fname = arch_fname.replace('\\', '/')
@@ -245,7 +230,6 @@ def make_transform(
         return np.array(img)
 
     def center_crop(width, height, img):
-        #pdb.set_trace()
         crop = np.min(img.shape[:2])
         img = img[(img.shape[0] - crop) // 2 : (img.shape[0] + crop) // 2, (img.shape[1] - crop) // 2 : (img.shape[1] + crop) // 2]
         img = PIL.Image.fromarray(img, 'RGB')
@@ -420,7 +404,6 @@ def convert_dataset(
     dataset_attrs = None
 
     labels = []
-    #pdb.set_trace()
     for idx, image in tqdm(enumerate(input_iter), total=num_files):
         idx_str = f'{idx:08d}'
         archive_fname = f'{idx_str[:5]}/img{idx_str}.png'
@@ -460,7 +443,6 @@ def convert_dataset(
         img.save(image_bits, format='png', compress_level=0, optimize=False)
         save_bytes(os.path.join(archive_root_dir, archive_fname), image_bits.getbuffer())
         labels.append([archive_fname, image['label']] if image['label'] is not None else None)
-    pdb.set_trace()
     metadata = {
         'labels': labels if all(x is not None for x in labels) else None
     }

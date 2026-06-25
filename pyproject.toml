@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iwarpgan"
+version = "0.1.0"
+description = "iWarpGAN for synthetic iris image generation"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "click>=8.1",
+    "Pillow>=10.0",
+    "scipy>=1.10",
+    "tqdm>=4.65",
+    "requests>=2.31",
+    "psutil>=5.0",
+    "matplotlib>=3.7",
+    "setuptools>=60",
+    "ninja",
+    "pyspng",
+    "packaging",
+]
+optional-dependencies = { gui = ["imgui", "glfw", "PyOpenGL"] }
+
+[project.scripts]
+iwarpgan-train = "train:main"
+iwarpgan-gen-images = "gen_images:main"
+iwarpgan-dataset-tool = "dataset_tool:convert_dataset"
+iwarpgan-calc-metrics = "calc_metrics:calc_metrics"
+iwarpgan-avg-spectra = "avg_spectra:main"
+iwarpgan-visualizer = "visualizer:main"
+
+[tool.setuptools.packages.find]
+include = ["dnnlib*", "torch_utils*", "training*", "metrics*", "gui_utils*", "viz*"]
+
+[tool.setuptools]
+py-modules = ["train", "gen_images", "dataset_tool", "calc_metrics", "avg_spectra", "visualizer", "legacy"]

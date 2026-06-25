@@ -22,7 +22,6 @@ import pickle
 from metrics import metric_main
 
 import legacy
-import pdb
 import shutil
 import metrics
 import copy
@@ -222,7 +221,7 @@ def testing_loop(
     
     if rank == 0:
         print('Constructing networks...')
-    common_kwargs = dict(use_es=use_es, use_ed=use_ed, c_dim=12, img_resolution=256, img_channels=3)
+    common_kwargs = dict(use_es=use_es, use_ed=use_ed, c_dim=testing_set.label_dim, img_resolution=testing_set.resolution, img_channels=testing_set.num_channels)
     G = dnnlib.util.construct_class_by_name(**G_kwargs, **common_kwargs).train().requires_grad_(False).to(device) # subclass of torch.nn.Module
     if use_es:
         #print('Build ES')
@@ -399,7 +398,7 @@ def parse_comma_separated_list(s):
 @click.option('--seed',         help='Random seed', metavar='INT',                              type=click.IntRange(min=0), default=0, show_default=True)
 @click.option('--fp32',         help='Disable mixed-precision', metavar='BOOL',                 type=bool, default=False, show_default=True)
 @click.option('--nobench',      help='Disable cuDNN benchmarking', metavar='BOOL',              type=bool, default=False, show_default=True)
-@click.option('--workers',      help='DataLoader worker processes', metavar='INT',              type=click.IntRange(min=1), default=24, show_default=True)
+@click.option('--workers',      help='DataLoader worker processes', metavar='INT',              type=click.IntRange(min=1), default=4, show_default=True)
 @click.option('-n','--dry-run', help='Print training options and exit',                         is_flag=True)
 
 
@@ -411,7 +410,6 @@ def main(**kwargs):
     # Initialize config.
     opts = dnnlib.EasyDict(kwargs) # Command line arguments.
     c = dnnlib.EasyDict() # Main config dict.
-    c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
 
     # Testing set.
     c.testing_set_kwargs, dataset_name = init_dataset_kwargs(data=opts.data)
@@ -438,12 +436,12 @@ def main(**kwargs):
     c.G_kwargs = dnnlib.EasyDict(class_name=None, z_dim=512, w_dim=512, mapping_kwargs=dnnlib.EasyDict())
     c.D_kwargs = dnnlib.EasyDict(class_name='training.networks_stylegan2.Discriminator', block_kwargs=dnnlib.EasyDict(), 
                                     mapping_kwargs=dnnlib.EasyDict(), epilogue_kwargs=dnnlib.EasyDict())
-    c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.ES_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.ED_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.RC_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
-    c.SP_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=[0,0.99], eps=1e-8)
+    c.G_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
+    c.D_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
+    c.ES_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
+    c.ED_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
+    c.RC_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
+    c.SP_opt_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', betas=(0.0,0.99), eps=1e-8)
     c.loss_kwargs = dnnlib.EasyDict(class_name='training.loss.StyleGAN2Loss')
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, prefetch_factor=2)
     c.use_es = opts.use_es

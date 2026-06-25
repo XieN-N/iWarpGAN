@@ -8,7 +8,6 @@ Reference: https://github.com/chi0tzp/WarpedGANSpace
 Matches the original implementation of configs E-F by Karras et al. at
 https://github.com/NVlabs/stylegan2/blob/master/training/networks_stylegan2.py"""
 
-from email.mime import image
 import numpy as np
 import torch
 from torch_utils import misc
@@ -17,8 +16,6 @@ from torch_utils.ops import conv2d_resample
 from torch_utils.ops import upfirdn2d
 from torch_utils.ops import bias_act
 from torch_utils.ops import fma
-import pdb
-
 #----------------------------------------------------------------------------
 
 @misc.profiled_function
@@ -1009,73 +1006,6 @@ class IDNetwork(torch.nn.Module):
         #x2 = torch.nn.functional.normalize(x2, p=2, dim=1)
 
         return combined_encoding
-
-#----------------------------------------------------------------------------
-'''
-@persistence.persistent_class
-class StyleNetwork(torch.nn.Module):
-    def __init__(self,
-        c_dim,                          # Conditioning label (C) dimensionality.
-        z_dim,
-        w_dim,
-        img_resolution,                 # Input resolution.
-        img_channels,                   # Number of input color channels.
-        use_es,
-        use_ed,
-        mapping_kwargs={},
-        num_ws = 1
-    ):
-        super().__init__()
-        self.c_dim = c_dim
-        self.w_dim = w_dim
-        self.img_resolution = img_resolution
-        self.img_resolution_log2 = int(np.log2(img_resolution))
-        self.img_channels = img_channels
-        self.z_dim = z_dim
-
-        self.image_encoder = torch.nn.Sequential(
-            torch.nn.Conv2d(self.img_channels, 64, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.MaxPool2d(kernel_size=2, stride=2),
-            torch.nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.MaxPool2d(kernel_size=2, stride=2),
-            torch.nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.MaxPool2d(kernel_size=2, stride=2),
-            torch.nn.AdaptiveAvgPool2d(1)
-        )
-
-        self.label_encoder = torch.nn.Sequential(
-            torch.nn.Linear(self.c_dim, 128),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(128, 64),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(64, self.c_dim),
-            torch.nn.ReLU(inplace=True)
-        )
-
-        self.fc = torch.nn.Linear(self.z_dim // 2 + self.c_dim, self.z_dim // 2)
-        #self.fc = torch.nn.Linear(self.z_dim // 2, self.z_dim // 2)
-
-    def forward(self, image, label):
-        image_encoding = self.image_encoder(image)
-        image_encoding = image_encoding.view(image_encoding.size(0), -1)
-        
-        label_encoding = self.label_encoder(label)
-        
-        combined_encoding = torch.cat((image_encoding, label_encoding), dim=1)
-        
-        combined_encoding = self.fc(combined_encoding)
-        
-        return combined_encoding
-'''
 
 #----------------------------------------------------------------------------
 

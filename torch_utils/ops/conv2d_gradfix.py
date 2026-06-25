@@ -8,7 +8,7 @@ arbitrarily high order gradients with zero performance penalty."""
 
 import contextlib
 import torch
-from pkg_resources import parse_version
+from packaging.version import parse as parse_version
 
 # pylint: disable=redefined-builtin
 # pylint: disable=arguments-differ
@@ -172,7 +172,10 @@ def _conv2d_gradfix(transpose, weight_shape, stride, padding, output_padding, di
             # General case => cuDNN.
             name = 'aten::cudnn_convolution_transpose_backward_weight' if transpose else 'aten::cudnn_convolution_backward_weight'
             flags = [torch.backends.cudnn.benchmark, torch.backends.cudnn.deterministic, torch.backends.cudnn.allow_tf32]
-            return torch._C._jit_get_operation(name)(weight_shape, grad_output, input, padding, stride, dilation, groups, *flags)
+            op = torch._C._jit_get_operation(name)
+            if isinstance(op, tuple):
+                op = op[0]
+            return op(weight_shape, grad_output, input, padding, stride, dilation, groups, *flags)
 
         @staticmethod
         def backward(ctx, grad2_grad_weight):
