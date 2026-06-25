@@ -4,6 +4,7 @@
 **iWarpGAN: Disentangling Identity and Style to Generate Synthetic Iris Images**<br>
 Shivangi Yadav and Arun Ross<br>
 https://arxiv.org/abs/2305.12596<br>
+Contributors: Stanislav Shtuka<br>
 
 Abstract: *Generative Adversarial Networks (GANs) have shown success in approximating complex distributions for synthetic image generation and for editing specific portions of an input image, particularly in faces. However, current GAN-based methods for generating biometric images, such as iris, have limitations in controlling the identity of the generated images, i.e., the synthetically generated images often closely resemble images in the training dataset. Further, the generated images often lack diversity in terms of the number of unique identities represented in them. To overcome these issues, we propose iWarpGAN that disentangles identity and style in the context of the iris modality by using two transformation pathways: Identity Transformation Pathway to generate unique identities from the training set, and Style Transformation Pathway to extract the style code from a reference image and output an iris image using this style. By concatenating the transformed identity code and reference style code, iWarpGAN generates iris images with both inter and intra-class variations. The efficacy of the proposed method in generating Iris DeepFakes is evaluated both qualitatively and quantitatively using ISO/IEC 29794-6 Standard Quality Metrics and the VeriEye iris matcher. Finally, the utility of the synthetically generated images is demonstrated by improving the performance of multiple deep learning based iris matchers that augment synthetic data with real data during the training process.*
 
@@ -119,6 +120,47 @@ References:
   year={2023},
   organization={IEEE}
 }
+```
+
+## Cluster Deployment (NSU HPC, A100)
+
+For NVIDIA A100 GPUs with driver 545.x (CUDA 12.3), use PyTorch with CUDA 12.1.
+
+### Prerequisites (login node with internet)
+
+```bash
+git clone <your-fork> /userspace/nickname/iris2026/iWarpGAN
+cd /userspace/nickname/iris2026/iWarpGAN
+
+conda create -y -n warp python=3.12 pip
+conda activate warp
+
+pip install torch==2.6.0 torchvision torchaudio \
+  --index-url https://download.pytorch.org/whl/cu121
+pip install -e .
+```
+
+### nvcc
+
+The custom CUDA extensions need `nvcc`. If it is not on `PATH`:
+
+```bash
+# check available modules
+module avail cuda
+module load cuda/12.1
+
+# or install a lightweight nvcc via pip (fallback):
+# pip install nvidia-nvcc-cu12
+```
+
+### Slurm
+
+Two scripts `run_stage1.sh` (StyleGAN2 pretrain) and `run_stage2.sh` (iWarpGAN) are provided in the repo root. Edit `BATCH`, `BATCH_GPU`, `DATA`, `OUTDIR` at the top of each, then submit:
+
+```bash
+sbatch run_stage1.sh
+# check logs, wait for completion
+sbatch run_stage2.sh
 ```
 
 ## Development
