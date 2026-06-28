@@ -2,21 +2,22 @@
 #SBATCH --job-name=iwarpgan-s1
 #SBATCH --partition=a100
 #SBATCH --nodelist=ngpu06
-#SBATCH --gres=gpu:1
-#SBATCH --mem=64G
 #SBATCH --error=/userspace/sse/iris2026/logs/stage1.err
 #SBATCH --output=/userspace/sse/iris2026/logs/stage1.log
 #SBATCH --open-mode=append
 
 # ========================= НАСТРОЙКИ =========================
-BATCH=8
-BATCH_GPU=8
+BATCH=128
+BATCH_GPU=128
 KIMG=25000
-CONDA_ENV=warp
+CONDA_ENV=/userspace/sse/.conda/envs/warp
 REPO=/userspace/sse/iris2026/iWarpGAN
 DATA=/userspace/sse/Datasets/casia_ours_128.zip
 OUTDIR=/userspace/sse/iris2026/training-runs
 # ==============================================================
+
+export TORCH_EXTENSIONS_DIR=/userspace/sse/.cache/torch_extensions
+mkdir -p "$TORCH_EXTENSIONS_DIR"
 
 mkdir -p "$OUTDIR" "$(dirname "$OUTDIR")/logs"
 

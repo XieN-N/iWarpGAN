@@ -266,8 +266,11 @@ def main(**kwargs):
 
     # Base configuration.
     c.ema_kimg = c.batch_size * 10 / 32
-    c.G_kwargs.class_name = 'training.networks_stylegan3.Generator'
-    c.G_kwargs.magnitude_ema_beta = 0.5 ** (c.batch_size / (20 * 1e3))
+    if opts.cfg == 'stylegan2':
+        c.G_kwargs.class_name = 'training.networks_stylegan2.Generator'
+    else:
+        c.G_kwargs.class_name = 'training.networks_stylegan3.Generator'
+        c.G_kwargs.magnitude_ema_beta = 0.5 ** (c.batch_size / (20 * 1e3))
     if opts.cfg == 'stylegan3-r':
         c.G_kwargs.conv_kernel = 1 # Use 1x1 convolutions.
         c.G_kwargs.channel_base *= 2 # Double the number of feature maps.
